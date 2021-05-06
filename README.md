@@ -6,9 +6,9 @@
 
 This is the `master` branch of the LTFS project. At this time, this branch is used for version 2.5 development. So it wouldn't be stable a little. Please consider to follow the tree on `v2.4-stable` branch if you want to use stable codes.
 
-# Linear Tape File System (LTFS)
+# What is the Linear Tape File System (LTFS)
 
-Linear Tape File System (LTFS) is a filesystem to mount a LTFS formatted tape in a tape drive. Once LTFS mounts a LTFS formatted tape as filesystem, user can access to the tape via filesystem API.
+The Linear Tape File System (LTFS) is a filesystem to mount a LTFS formatted tape in a tape drive. Once LTFS mounts a LTFS formatted tape as filesystem, user can access to the tape via filesystem API.
 
 Objective of this project is being the reference implementation of the LTFS format Specifications in [SNIA](https://www.snia.org/tech_activities/standards/curr_standards/ltfs).
 
@@ -107,7 +107,7 @@ These instructions will get you a copy of the project up and running on your loc
   | Quantum | LTO8 (Only Half Height) | T.B.D.            |
   | Quantum | LTO9 (Only Half Height) | T.B.D.            |
 
-## Installing
+## LTFS Format Specifications
 
 LTFS Format Specification is specified data placement, shape of index and names of extended attributes for LTFS. This specification is defined in [SNIA](https://www.snia.org/tech_activities/standards/curr_standards/ltfs) first and then it is forwarded to [ISO](https://www.iso.org/home.html) as ISO/IEC 20919 from version 2.2.
 
@@ -204,7 +204,7 @@ make install
 
 In some systems, you might need `sudo ldconfig -v` after `make install` to load the shared libraries correctly.
 
-#### Parameter settings of the sg driver
+### Buildable Linux distributions
 
 LTFS uses the sg driver by default. You can improve reliability to change parameters of the sg driver below.
 
@@ -309,9 +309,9 @@ Currently, automatic build checking is working on GitHub Actions and Travis CI.
 
 For Ubuntu20.04 and Debian10, dummy `icu-config` is needed in the build machine. See Issue [#153](https://github.com/LinearTapeFileSystem/ltfs/issues/153).
 
-### Build and install on OSX (macOS)
+## Build and install on OSX (macOS)
 
-#### Recent Homedrew system setup
+### Recent Homedrew system setup
 
 Before build on macOS, you need to configure the environment like below.
 
@@ -322,7 +322,7 @@ export PKG_CONFIG_PATH="/usr/local/opt/icu4c/lib/pkgconfig:/usr/local/opt/libxml
 export PATH="$PATH:$ICU_PATH:$LIBXML2_PATH"
 ```
 
-#### Old Homedrew system setup
+### Old Homedrew system setup
 Before build on OSX (macOS), some include path adjustment is required.
 
 ```
@@ -330,7 +330,7 @@ brew link --force icu4c
 brew link --force libxml2
 ```
 
-#### Building LTFS
+### Building LTFS
 On OSX (macOS), snmp cannot be supported, you need to disable it on configure script. And may be, you need to specify LDFLAGS while running configure script to link some required frameworks, CoreFundation and IOKit.
 
 ```
@@ -342,13 +342,13 @@ make install
 
 `./configure --help` shows various options for build and install.
 
-#### Buildable systems
+#### Buildable macOS systems
 
   | OS            | Xcode  | Package system | Status      |
   |:-:            |:-:     |:-:             |:-:          |
   | macOS 10.14.6 | 11.3   | Homebrew       | Probably OK |
 
-### Build and install on FreeBSD
+## Build and install on FreeBSD
 
 Note that on FreeBSD, the usual 3rd party man directory is /usr/local/man. Configure defaults to using /usr/local/share/man.  So, override it on the command line to avoid having man pages put in the wrong place.
 
@@ -361,9 +361,10 @@ make install
 
 #### Buildable versions
 
-  | Version | Arch    | Status      |
-  |:-:      |:-:      |:-:          |
-  | 11      | x86_64  | OK          |
+  | Version | Arch    | Status                         |
+  |:-------:|:-------:|:------------------------------:|
+  | 11      | x86\_64 | OK - Not checked automatically |
+  | 12      | x86\_64  | OK - Not checked automatically |
 
 ### Build and install on NetBSD
 
@@ -376,11 +377,11 @@ make install
 
 #### Buildable versions
 
-  | Version | Arch    | Status      |
-  |:-:      |:-:      |:-:          |
-  | 8.1     | amd64   | OK          |
-  | 8.0     | i386    | OK          |
-  | 7.2     | amd64   | OK          |
+  | Version | Arch  | Status                         |
+  |:-------:|:-----:|:------------------------------:|
+  | 8.1     | amd64 | OK - Not checked automatically |
+  | 8.0     | i386  | OK - Not checked automatically |
+  | 7.2     | amd64 | OK - Not checked automatically |
 
 ## Contributing
 
