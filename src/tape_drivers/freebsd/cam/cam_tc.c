@@ -1139,7 +1139,7 @@ int camtape_load(void *device, struct tc_position *pos)
 		/*
 		 * Non-IBM drive doesn't have cartridge type so need to assume from density code.
 		 */
-		softc->cart_type = assume_cart_type(priv->density_code);
+		softc->cart_type = assume_cart_type(softc->density_code);
 		if (buf[2] == 0x01)
 			softc->is_worm = true;
 	} else {
