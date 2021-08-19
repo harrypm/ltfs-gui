@@ -1,5 +1,5 @@
 <!doctype reference PUBLIC "-//OASIS//DTD DocBook V4.1//EN" [
-          <!ENTITY dhcommand "ltfs-sde">
+          <!ENTITY dhcommand "ltfs">
           <!ENTITY gnu       "<acronym>GNU</acronym>">
           ]>
 
