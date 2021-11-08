@@ -364,7 +364,7 @@ make install
   | Version | Arch    | Status                         |
   |:-------:|:-------:|:------------------------------:|
   | 11      | x86\_64 | OK - Not checked automatically |
-  | 12      | x86\_64  | OK - Not checked automatically |
+  | 12      | x86\_64 | OK - Not checked automatically |
 
 ### Build and install on NetBSD
 
