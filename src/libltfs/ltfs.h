@@ -48,6 +48,10 @@
 **                  IBM Almaden Research Center
 **                  lucasvr@us.ibm.com
 **
+**                  Atsushi Abe
+**                  IBM Tokyo Lab., Japan
+**                  piste@jp.ibm.com
+**
 *************************************************************************************
 */
 #ifndef __ltfs_h__
@@ -381,9 +385,10 @@ enum volumelock_status {
 };
 
 enum volume_mount_type {
-	MOUNT_NORMAL = 0, /**< Normal mount */
-	MOUNT_ROLLBACK,   /**< Roll back mount */
-	MOUNT_ERR_TAPE,   /**< Mount write perm tape */
+	MOUNT_NORMAL = 0,    /**< Normal mount */
+	MOUNT_ROLLBACK,      /**< Roll back mount */
+	MOUNT_ROLLBACK_META, /**< Roll back mount only with meta-data */
+	MOUNT_ERR_TAPE,      /**< Mount write perm tape */
 };
 
 #define VOL_WRITE_PERM_MASK (0xE0)
@@ -399,7 +404,8 @@ struct ltfs_volume {
 	struct tc_coherency dp_coh;    /**< Data partition coherency info */
 	struct ltfs_label *label;      /**< Information from the partition labels */
 	struct ltfs_index *index;      /**< Current cartridge index */
-	char   *index_cache_path;      /**< File name of on-disk index cache */
+	char   *index_cache_path_w;    /**< File name of on-disk index cache update at writing an index */
+	char   *index_cache_path_r;    /**< File name of on-disk index cache update at parsing an index */
 
 	/* Opaque handles to higher-level structures */
 	void *iosched_handle;          /**< Handle to the I/O scheduler state */
@@ -652,6 +658,7 @@ bool ltfs_get_criteria_allow_update(struct ltfs_volume *vol);
 int ltfs_start_mount(bool trial, struct ltfs_volume *vol);
 int ltfs_mount(bool force_full, bool deep_recovery, bool recover_extra, bool recover_symlink,
 			   unsigned short gen, struct ltfs_volume *vol);
+int ltfs_mount_indexfile(char* filename, bool label_check, struct ltfs_volume *vol);
 int ltfs_unmount(char *reason, struct ltfs_volume *vol);
 void ltfs_dump_tree_unlocked(struct ltfs_index *index);
 void ltfs_dump_tree(struct ltfs_volume *vol);
@@ -689,7 +696,7 @@ int ltfs_parse_library_backend_opts(void *opt_args, void *opts);
 void ltfs_set_index_dirty(bool locking, bool atime, struct ltfs_index *idx);
 void ltfs_unset_index_dirty(bool update_version, struct ltfs_index *idx);
 int ltfs_write_index(char partition, char *reason, struct ltfs_volume *vol);
-int ltfs_save_index_to_disk(const char *work_dir, char * reason, bool need_gen, struct ltfs_volume *vol);
+int ltfs_save_index_to_disk(const char *work_dir, char *reason, char id, struct ltfs_volume *vol);
 
 char ltfs_dp_id(struct ltfs_volume *vol);
 char ltfs_ip_id(struct ltfs_volume *vol);
@@ -698,11 +705,11 @@ const char *ltfs_get_volume_uuid(struct ltfs_volume *vol);
 int ltfs_sync_index(char *reason, bool index_locking, struct ltfs_volume *vol);
 
 int ltfs_traverse_index_forward(struct ltfs_volume *vol, char partition, unsigned int gen,
-								f_index_found func, void **list, void *priv);
+								bool skip_dir, f_index_found func, void **list, void *priv);
 int ltfs_traverse_index_backward(struct ltfs_volume *vol, char partition, unsigned int gen,
-								 f_index_found func, void **list, void *priv);
+								 bool skip_dir, f_index_found func, void **list, void *priv);
 int ltfs_traverse_index_no_eod(struct ltfs_volume *vol, char partition, unsigned int gen,
-								f_index_found func, void **list, void *priv);
+							   bool skip_dir, f_index_found func, void **list, void *priv);
 int ltfs_check_eod_status(struct ltfs_volume *vol);
 int ltfs_recover_eod(struct ltfs_volume *vol);
 int ltfs_release_medium(struct ltfs_volume *vol);

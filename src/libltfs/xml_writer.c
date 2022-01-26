@@ -48,6 +48,10 @@
 **                  IBM Almaden Research Center
 **                  lucasvr@us.ibm.com
 **
+**                  Atsushi Abe
+**                  IBM Tokyo Lab., Japan
+**                  piste@jp.ibm.com
+**
 *************************************************************************************
 */
 

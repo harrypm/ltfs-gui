@@ -44,6 +44,10 @@
 **                  IBM Almaden Research Center
 **                  bbiskebo@us.ibm.com
 **
+**                  Atsushi Abe
+**                  IBM Tokyo Lab., Japan
+**                  piste@jp.ibm.com
+**
 *************************************************************************************
 */
 
@@ -70,7 +74,8 @@ int ltfs_check_medium(bool fix, bool deep, bool recover_extra, bool recover_syml
 int ltfs_read_labels(bool trial, struct ltfs_volume *vol);
 int ltfs_read_one_label(tape_partition_t partition, struct ltfs_label *label,
 	struct ltfs_volume *vol);
-int ltfs_read_index(uint64_t eod_pos, bool recover_symlink, struct ltfs_volume *vol);
+int ltfs_read_index(uint64_t eod_pos, bool recover_symlink, bool skip_dir, struct ltfs_volume *vol);
+int ltfs_read_indexfile(char* filename, bool recover_symlink, struct ltfs_volume *vol);
 
 int ltfs_update_cart_coherency(struct ltfs_volume *vol);
 int ltfs_write_index_conditional(char partition, struct ltfs_volume *vol);
