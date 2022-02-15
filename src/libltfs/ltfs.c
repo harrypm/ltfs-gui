@@ -2020,7 +2020,7 @@ int ltfs_mount_indexfile(char* filename, bool label_check, struct ltfs_volume *v
 			 * Volume UUID in label and it on index is not matched.
 			 * Actual UUID is not printed to avoid illegal modification by hand.
 			 */
-			ltfsmsg(LTFS_ERR, 17290E);
+			ltfsmsg(LTFS_ERR, 17292E);
 			ret = -LTFS_LABEL_MISMATCH;
 		}
 	}
