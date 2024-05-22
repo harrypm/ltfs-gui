@@ -65,6 +65,7 @@
 #include "iosched.h"
 #include "ltfs_fsops.h"
 #include "xattr.h"
+#include "inc_journal.h"
 
 /**
  * Allocate an empty LTFS index.
@@ -1525,5 +1526,24 @@ err_out_func:
 out_func:
 	free(lfdir);
 	free(path);
+	return ret;
+}
+
+int ltfs_set_dentry_dirty(struct dentry *d, struct ltfs_volume *vol)
+{
+	int ret = 0;
+	char *full_path = NULL;
+
+	if (!d->dirty) {
+		ret = ltfs_build_fullpath(&full_path, d);
+		if (!ret) {
+			incj_modify(full_path, d, vol);
+		} else {
+			vol->journal_err = true;
+		}
+	}
+
+	d->dirty = true;
+
 	return ret;
 }
