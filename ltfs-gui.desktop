@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=LTFS Manager
+Comment=GUI interface for Linear Tape File System operations with compression control and diagnostics
+Exec=ltfs-gui
+Icon=drive-removable-media
+Terminal=false
+Categories=System;Utility;HardwareSettings;
+Keywords=tape;ltfs;backup;archive;compression;diagnostics;mount;
+

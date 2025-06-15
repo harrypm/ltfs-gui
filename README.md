@@ -107,6 +107,8 @@ These instructions will get you a copy of the project up and running on your loc
   | Quantum | LTO8 (Only Half Height) | T.B.D.            |
   | Quantum | LTO9 (Only Half Height) | T.B.D.            |
 
+**Note**: Quantum LTO-5 drives require specific block size settings for optimal compatibility. See [Quantum LTO-5 Compatibility Notes](QUANTUM_LTO5_COMPATIBILITY.md) for details.
+
 ## LTFS Format Specifications
 
 LTFS Format Specification is specified data placement, shape of index and names of extended attributes for LTFS. This specification is defined in [SNIA](https://www.snia.org/tech_activities/standards/curr_standards/ltfs) first and then it is forwarded to [ISO](https://www.iso.org/home.html) as ISO/IEC 20919 from version 2.2.
@@ -189,20 +191,391 @@ These instructions will get a copy of the project up and running on your local m
 
 ## Prerequisites for build
 
-Please refer [this page](https://github.com/LinearTapeFileSystem/ltfs/wiki/Build-Environments).
+### System Requirements
+
+- Linux kernel 2.6 or later with FUSE support
+- GCC 4.8 or later (or Clang)
+- Python 3.6+ (for GUI and utilities)
+- Tape drive with SCSI Generic (sg) support
+
+### Required Dependencies
+
+Before building LTFS, you need to install the following dependencies:
+
+#### Ubuntu/Debian/Linux Mint Systems
+
+```bash
+# Update package list
+sudo apt update
+
+# Install build tools
+sudo apt install build-essential autotools-dev automake libtool pkg-config
+
+# Install core dependencies
+sudo apt install libfuse-dev libxml2-dev uuid-dev libicu-dev
+
+# Install ICU development tools
+sudo apt install icu-devtools libicu-dev
+
+# Install additional required libraries
+sudo apt install libpthread-stubs0-dev
+
+# Install SNMP support (optional but recommended)
+sudo apt install libsnmp-dev
+
+# Install Python dependencies for GUI
+sudo apt install python3 python3-tk
+
+# For Ubuntu 20.04/22.04 and Debian 10/11 - fix missing icu-config
+sudo apt install libicu-dev
+# If icu-config is still missing, create a dummy:
+if ! command -v icu-config &> /dev/null; then
+    echo '#!/bin/bash' | sudo tee /usr/local/bin/icu-config
+    echo 'pkg-config "$@" icu-i18n icu-uc icu-io' | sudo tee -a /usr/local/bin/icu-config
+    sudo chmod +x /usr/local/bin/icu-config
+fi
+```
+
+#### RHEL/CentOS/Rocky Linux/Fedora Systems
+
+```bash
+# For RHEL 8/CentOS 8/Rocky Linux
+sudo dnf groupinstall "Development Tools"
+sudo dnf install autoconf automake libtool pkgconfig
+sudo dnf install fuse-devel libxml2-devel libuuid-devel libicu-devel
+sudo dnf install net-snmp-devel python3 python3-tkinter
+
+# For CentOS 7 (older)
+sudo yum groupinstall "Development Tools"
+sudo yum install autoconf automake libtool pkgconfig
+sudo yum install fuse-devel libxml2-devel libuuid-devel libicu-devel
+sudo yum install net-snmp-devel python3 python3-tkinter
+
+# For Fedora (latest)
+sudo dnf groupinstall "Development Tools" "Development Libraries"
+sudo dnf install autoconf automake libtool pkgconfig
+sudo dnf install fuse-devel libxml2-devel libuuid-devel libicu-devel
+sudo dnf install net-snmp-devel python3 python3-tkinter
+```
+
+#### ArchLinux
+
+```bash
+sudo pacman -S base-devel autoconf automake libtool pkgconfig
+sudo pacman -S fuse2 libxml2 util-linux-libs icu
+sudo pacman -S net-snmp python python-tk
+```
+
+### Minimum Version Requirements
+
+- **FUSE**: >= 2.6.0
+- **libxml2**: >= 2.6.16
+- **UUID library**: >= 1.36 (Linux), >= 1.6 (macOS)
+- **ICU**: >= 0.21
+- **net-snmp**: >= 5.3 (optional)
+- **Python**: >= 3.6 (for GUI)
 
 ## Build and install on Linux
 
-```
+### Step 1: Prepare the Build Environment
+
+```bash
+# Clone the repository (if not already done)
+git clone https://github.com/LinearTapeFileSystem/ltfs.git
+cd ltfs
+
+# Generate configure script
 ./autogen.sh
-./configure
-make
-make install
 ```
 
-`./configure --help` shows various options for build and install.
+### Step 2: Configure the Build
 
-In some systems, you might need `sudo ldconfig -v` after `make install` to load the shared libraries correctly.
+```bash
+# Basic configuration
+./configure
+
+# Or with custom options:
+./configure --prefix=/usr/local --enable-lintape
+
+# For systems without SNMP (like macOS):
+./configure --disable-snmp
+
+# For debug build:
+./configure --enable-debug
+```
+
+**Common configure options:**
+- `--prefix=PATH`: Installation prefix (default: /usr/local)
+- `--enable-lintape`: Enable IBM lin_tape driver support
+- `--disable-snmp`: Disable SNMP support
+- `--enable-debug`: Compile with debug symbols
+- `--enable-fast`: Enable optimizations
+- `--help`: Show all options
+
+### Step 3: Build
+
+```bash
+# Build using all available CPU cores
+make -j$(nproc)
+
+# Or build with single thread (if errors occur)
+make
+```
+
+### Step 4: Install
+
+```bash
+# Install to system
+sudo make install
+
+# Update library cache
+sudo ldconfig -v
+```
+
+### Step 5: Post-Installation Setup
+
+#### 1. Set up user permissions
+
+```bash
+# Add your user to the tape group
+sudo usermod -a -G tape $USER
+
+# Create tape group if it doesn't exist
+if ! getent group tape > /dev/null; then
+    sudo groupadd tape
+    sudo usermod -a -G tape $USER
+fi
+
+# Log out and back in for changes to take effect
+```
+
+#### 2. Verify installation
+
+```bash
+# Check LTFS version
+ltfs --version
+
+# Check available commands
+which ltfs mkltfs
+
+# List tape drives (requires tape drive connected)
+ltfs -o device_list
+```
+
+#### 3. Install LTFS GUI (optional)
+
+```bash
+# Using the installation script
+./install_ltfs_gui.sh
+
+# Or manually
+chmod +x ltfs_gui.py
+cp ltfs_gui.py ~/.local/bin/ltfs-gui
+cp ltfs-gui.desktop ~/.local/share/applications/
+```
+
+## Troubleshooting Common Issues
+
+### FUSE Issues
+
+#### Problem: "fuse: failed to open /dev/fuse: Permission denied"
+
+**Solution:**
+```bash
+# Check if FUSE is loaded
+lsmod | grep fuse
+
+# Load FUSE module if not loaded
+sudo modprobe fuse
+
+# Add to auto-load at boot
+echo 'fuse' | sudo tee -a /etc/modules
+
+# Check FUSE device permissions
+ls -la /dev/fuse
+
+# Fix permissions if needed
+sudo chmod 666 /dev/fuse
+```
+
+#### Problem: "configure: error: Package requirements (fuse >= 2.6.0) were not met"
+
+**Solution:**
+```bash
+# Ubuntu/Debian
+sudo apt install libfuse-dev
+
+# RHEL/CentOS/Fedora
+sudo dnf install fuse-devel  # or yum install fuse-devel
+
+# Verify FUSE version
+pkg-config --modversion fuse
+```
+
+### ICU Issues
+
+#### Problem: "icu-config not found" or "ICU not detected"
+
+**Solution for Ubuntu 20.04+/Debian 10+:**
+```bash
+# Install ICU development package
+sudo apt install libicu-dev icu-devtools
+
+# Create dummy icu-config if still missing
+if ! command -v icu-config &> /dev/null; then
+    cat << 'EOF' | sudo tee /usr/local/bin/icu-config
+#!/bin/bash
+pkg-config "$@" icu-i18n icu-uc icu-io
+EOF
+    sudo chmod +x /usr/local/bin/icu-config
+fi
+
+# Verify ICU
+pkg-config --modversion icu-i18n
+```
+
+**Solution for RHEL/CentOS:**
+```bash
+# Install ICU
+sudo dnf install libicu-devel  # or yum install libicu-devel
+
+# Set PKG_CONFIG_PATH if needed
+export PKG_CONFIG_PATH="/usr/lib64/pkgconfig:$PKG_CONFIG_PATH"
+```
+
+### Tape Device Issues
+
+#### Problem: "No tape drives found" or permission errors
+
+**Solution:**
+```bash
+# Check for SCSI tape devices
+ls -la /dev/st* /dev/nst* /dev/sg*
+
+# Check tape device permissions
+ls -la /dev/sg*
+
+# Add user to tape group (if not done already)
+sudo usermod -a -G tape $USER
+
+# Set proper udev rules for tape devices
+echo 'SUBSYSTEM=="scsi_generic", GROUP="tape", MODE="0664"' | sudo tee /etc/udev/rules.d/60-tape.rules
+echo 'SUBSYSTEM=="scsi_tape", GROUP="tape", MODE="0664"' | sudo tee -a /etc/udev/rules.d/60-tape.rules
+
+# Reload udev rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+### Build Issues
+
+#### Problem: "genrb not found" or "pkgdata not found"
+
+**Solution:**
+```bash
+# Ubuntu/Debian
+sudo apt install icu-devtools
+
+# RHEL/CentOS/Fedora
+sudo dnf install libicu-devel
+
+# Verify tools are available
+which genrb pkgdata
+```
+
+#### Problem: Compilation errors with newer GCC
+
+**Solution:**
+```bash
+# Use older GCC version if available
+sudo apt install gcc-8 g++-8  # Ubuntu/Debian
+export CC=gcc-8
+export CXX=g++-8
+./configure
+
+# Or disable specific warnings
+export CFLAGS="-Wno-error=stringop-truncation"
+./configure
+```
+
+### Python GUI Issues
+
+#### Problem: "tkinter not found" or GUI won't start
+
+**Solution:**
+```bash
+# Ubuntu/Debian/Linux Mint
+sudo apt install python3-tk
+
+# RHEL/CentOS/Fedora
+sudo dnf install python3-tkinter
+
+# Test tkinter
+python3 -c "import tkinter; print('tkinter OK')"
+
+# Run GUI test
+python3 test_ltfs_gui.py
+```
+
+### Runtime Issues
+
+#### Problem: "ltfs: command not found" after installation
+
+**Solution:**
+```bash
+# Check installation location
+which ltfs || echo "Not in PATH"
+
+# Add to PATH if installed in /usr/local
+echo 'export PATH="/usr/local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+
+# Or create symlinks
+sudo ln -sf /usr/local/bin/ltfs /usr/bin/ltfs
+sudo ln -sf /usr/local/bin/mkltfs /usr/bin/mkltfs
+```
+
+#### Problem: "error while loading shared libraries"
+
+**Solution:**
+```bash
+# Update library cache
+sudo ldconfig -v
+
+# Add library path if needed
+echo '/usr/local/lib' | sudo tee -a /etc/ld.so.conf
+sudo ldconfig
+
+# Or set LD_LIBRARY_PATH
+export LD_LIBRARY_PATH="/usr/local/lib:$LD_LIBRARY_PATH"
+```
+
+## Testing the Installation
+
+```bash
+# Test basic functionality
+ltfs --version
+mkltfs --help
+
+# Test device detection (with tape drive connected)
+ltfs -o device_list
+
+# Test GUI (if installed)
+./ltfs_gui.py
+
+# Run comprehensive test
+./test_ltfs_gui.py
+```
+
+## Quick Install Script
+
+For a one-command installation on Ubuntu/Debian/Linux Mint:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/LinearTapeFileSystem/ltfs/master/scripts/install-ubuntu.sh | bash
+```
+
+**Note:** Always review scripts before running them. The above is an example - create your own install script as needed.
 
 ### Buildable Linux distributions
 
