@@ -25,7 +25,7 @@ echo
 # Define tools and their packages for different distributions
 declare -A DEBIAN_PACKAGES=(
     ["sg3-utils"]="sg3-utils"
-    ["tapeinfo"]="tapeinfo"
+    ["tapeinfo"]="mtx"
     ["lsscsi"]="lsscsi"
     ["sysstat"]="sysstat"
 )

@@ -1,0 +1,63 @@
+Gjs-Message: 15:20:29.513: Profiler is disabled. Not setting up signals.
+Gjs-Message: 15:20:29.811: JS LOG: About to start Cinnamon (X11 backend)
+Gjs-Message: 15:20:29.855: JS LOG: [LookingGlass/info] Cinnamon.AppSystem.get_default() started in 41 ms
+Gjs-Message: 15:20:29.857: JS LOG: [LookingGlass/info] loading user theme: /usr/share/themes/Mint-Y-Dark-Aqua/cinnamon/cinnamon.css
+Gjs-Message: 15:20:29.871: JS LOG: [LookingGlass/info] added icon directory: /usr/share/themes/Mint-Y-Dark-Aqua/cinnamon
+Gjs-Message: 15:20:30.023: JS LOG: [LookingGlass/info] loaded at Sat Jun 14 2025 15:20:30 GMT+0100 (British Summer Time)
+Gjs-Message: 15:20:30.024: JS LOG: Cinnamon started at Sat Jun 14 2025 15:20:30 GMT+0100 (British Summer Time)
+Gjs-Message: 15:20:30.034: JS LOG: [LookingGlass/info] ExtensionSystem started in 0 ms
+Gjs-Message: 15:20:30.035: JS LOG: [LookingGlass/info] DeskletManager started in 1 ms
+Gjs-Message: 15:20:30.035: JS LOG: [LookingGlass/info] SearchProviderManager started in 1 ms
+Gjs-Message: 15:20:30.176: JS LOG: [LookingGlass/info] Loaded applet separator@cinnamon.org in 24 ms
+Gjs-Message: 15:20:30.241: JS LOG: [LookingGlass/info] Loaded applet removable-drives@cinnamon.org in 63 ms
+Gjs-Message: 15:20:30.251: JS LOG: [LookingGlass/info] Role locked: tray
+Gjs-Message: 15:20:30.255: JS LOG: [LookingGlass/info] Loaded applet systray@cinnamon.org in 14 ms
+Gjs-Message: 15:20:30.265: JS LOG: [LookingGlass/info] Loaded applet favorites@cinnamon.org in 9 ms
+Gjs-Message: 15:20:30.295: JS LOG: [LookingGlass/info] Loaded applet printers@cinnamon.org in 30 ms
+Gjs-Message: 15:20:30.300: JS LOG: [LookingGlass/info] Role locked: notifications
+Gjs-Message: 15:20:30.307: JS LOG: [LookingGlass/info] Loaded applet notifications@cinnamon.org in 12 ms
+Gjs-Message: 15:20:30.320: JS LOG: [LookingGlass/info] Loaded applet keyboard@cinnamon.org in 13 ms
+Gjs-Message: 15:20:30.345: JS LOG: [LookingGlass/info] Loaded applet calendar@cinnamon.org in 25 ms
+Gjs-Message: 15:20:30.356: JS LOG: [LookingGlass/info] Loaded applet cornerbar@cinnamon.org in 11 ms
+Gjs-Message: 15:20:30.359: JS LOG: [LookingGlass/info] Loaded applet xapp-status@cinnamon.org in 3 ms
+Gjs-Message: 15:20:30.361: JS LOG: calendar@cinnamon.org: Calendar events supported.
+Gjs-Message: 15:20:30.372: JS LOG: [LookingGlass/info] Loaded applet power@cinnamon.org in 12 ms
+Gjs-Message: 15:20:30.402: JS LOG: [LookingGlass/info] Role locked: panellauncher
+Gjs-Message: 15:20:30.402: JS LOG: [LookingGlass/info] Role locked: windowattentionhandler
+Gjs-Message: 15:20:30.405: JS LOG: [LookingGlass/info] Loaded applet grouped-window-list@cinnamon.org in 33 ms
+Gjs-Message: 15:20:30.442: JS LOG: [LookingGlass/info] Loaded applet sound@cinnamon.org in 37 ms
+Gjs-Message: 15:20:30.444: JS LOG: [LookingGlass/info] Adding XAppStatusIcon: mintUpdate.py (:1.90/org/x/StatusIcon/Icon)
+Gjs-Message: 15:20:30.448: JS LOG: [LookingGlass/info] Adding XAppStatusIcon: nm-applet (:1.42/org/x/StatusIcon/Icon)
+Gjs-Message: 15:20:30.450: JS LOG: [LookingGlass/info] Adding XAppStatusIcon: blueman (:1.41/org/x/StatusIcon/Icon)
+Gjs-Message: 15:20:30.453: JS LOG: [LookingGlass/info] Adding XAppStatusIcon: :1.137 (:1.41/org/x/StatusIcon/Icon_1)
+Gjs-Message: 15:20:30.455: JS LOG: [LookingGlass/info] Adding XAppStatusIcon: mintreport (:1.95/org/x/StatusIcon/Icon)
+Gjs-Message: 15:20:30.456: JS LOG: [LookingGlass/info] Adding XAppStatusIcon: process-monitor (:1.95/org/x/StatusIcon/Icon_1)
+Gjs-Message: 15:20:30.518: JS LOG: [LookingGlass/info] Hiding XAppStatusIcon (we have an applet): nm-applet (:1.42/org/x/StatusIcon/Icon)
+Gjs-Message: 15:20:30.525: JS LOG: [LookingGlass/info] Loaded applet network@cinnamon.org in 83 ms
+Gjs-Message: 15:20:30.626: JS LOG: [LookingGlass/info] Loaded applet menu@cinnamon.org in 100 ms
+Gjs-Message: 15:20:30.626: JS LOG: [LookingGlass/info] AppletManager started in 601 ms
+Gjs-Message: 15:20:30.631: JS LOG: [LookingGlass/info] Cinnamon took 820 ms to start
+Gjs-Message: 15:20:30.678: JS LOG: Unknown network device type, is 14
+Gjs-Message: 15:20:30.686: JS LOG: Unknown network device type, is 30
+Gjs-Message: 15:20:31.008: JS LOG: [LookingGlass/info] GPU offload supported: false
+Gjs-Message: 15:20:33.850: JS LOG: Enabling WindowAttentionHandler
+Window manager warning: Buggy client sent a _NET_ACTIVE_WINDOW message with a timestamp of 0 for 0x3c00003
+Window manager warning: Buggy client sent a _NET_ACTIVE_WINDOW message with a timestamp of 0 for 0x3c00003
+Window manager warning: Buggy client sent a _NET_ACTIVE_WINDOW message with a timestamp of 0 for 0x3c00003
+Window manager warning: Buggy client sent a _NET_ACTIVE_WINDOW message with a timestamp of 0 for 0x3c00003
+
+** (cinnamon:44354): WARNING **: 05:13:10.159: cinnamon_app_create_icon_texture: MetaWindow 0x5592d8f16f20 provided that does not match App 0x5592d75308c0
+
+** (cinnamon:44354): WARNING **: 05:13:10.169: cinnamon_app_create_icon_texture: MetaWindow 0x5592d8f16f20 provided that does not match App 0x5592d75308c0
+
+** (cinnamon:44354): WARNING **: 05:13:29.341: cinnamon_app_create_icon_texture: MetaWindow 0x5592d687d430 provided that does not match App 0x5592d75308c0
+
+** (cinnamon:44354): WARNING **: 05:13:29.348: cinnamon_app_create_icon_texture: MetaWindow 0x5592d687d430 provided that does not match App 0x5592d75308c0
+
+(cinnamon:44354): Clutter-WARNING **: 05:16:49.737: Attempting to remove actor of type 'StIcon' from group of class 'ClutterBox', but the container is not the actor's parent.
+
+(cinnamon:44354): Clutter-WARNING **: 05:35:23.965: Attempting to remove actor of type 'StIcon' from group of class 'ClutterBox', but the container is not the actor's parent.
+0
+Window manager warning: WM_TRANSIENT_FOR window 0x3836a7c for 0x383f1dc window override-redirect is an override-redirect window and this is not correct according to the standard, so we'll fallback to the first non-override-redirect window 0x38357cd.
+Window manager warning: Buggy client sent a _NET_ACTIVE_WINDOW message with a timestamp of 0 for 0x8200003
+Window manager warning: Buggy client sent a _NET_ACTIVE_WINDOW message with a timestamp of 0 for 0x8200003

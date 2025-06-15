@@ -35,7 +35,7 @@ For full diagnostic functionality, install these additional tools:
 
 **Ubuntu/Debian:**
 ```bash
-sudo apt install sg3-utils tapeinfo lsscsi sysstat
+sudo apt install sg3-utils mtx lsscsi sysstat
 ```
 
 **RHEL/CentOS/Rocky/AlmaLinux:**

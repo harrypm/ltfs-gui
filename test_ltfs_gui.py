@@ -110,7 +110,7 @@ def test_permissions():
     import os
     import stat
     
-    tape_devices = ['/dev/st0', '/dev/nst0']
+    tape_devices = ['/dev/st0']  # Only test the working device
     
     for device in tape_devices:
         if os.path.exists(device):

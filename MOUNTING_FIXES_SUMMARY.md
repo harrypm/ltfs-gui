@@ -6,16 +6,17 @@ This document summarizes the mounting fixes that have been implemented in the LT
 
 ## Fixed Issues
 
-### 1. Device Selection Priority
+### 1. Device Selection Priority - FIXED
 
-**Problem**: The GUI was sometimes selecting variant tape devices (e.g., `/dev/nst0a`) instead of basic devices (e.g., `/dev/nst0`), causing mounting issues.
+**Problem**: The GUI was selecting variant and non-rewinding tape devices (e.g., `/dev/nst0`, `/dev/nst0a`) that don't work with LTFS mounting.
 
-**Solution**: Implemented prioritized device selection:
-- Basic devices (`/dev/st0`, `/dev/nst0`) are prioritized over variants (`/dev/st0a`, `/dev/st0l`, `/dev/st0m`)
-- Devices are sorted and presented with basic devices first
-- The `get_selected_device()` method includes fallback logic to prefer basic devices
+**Solution**: Simplified to use only `/dev/st0` as the primary device:
+- `/dev/st0` is set as the default and primary device (the one that actually works)
+- Non-rewinding devices (`/dev/nst*`) are avoided as they cause mounting issues
+- Other variant devices are included as override options only if they respond to basic commands
+- GUI always defaults to `/dev/st0` when available
 
-**Location**: `ltfs_gui.py` lines 49-93, 1451-1486
+**Location**: `ltfs_gui.py` lines 43-84, 1387-1407
 
 ### 2. Quantum LTO-5 Compatibility
 
@@ -77,6 +78,25 @@ mount_commands = [
 
 **Location**: `ltfs_gui.py` lines 1749-1834
 
+### 7. Auto-Mount Point Generation - NEW FIX
+
+**Problem**: Users had to manually specify mount points, and GUI showed "please specify device and mount point" errors even when device was selected.
+
+**Solution**: Automatic mount point generation following standard Linux conventions:
+- Auto-generates mount points in `/media/username/ltfs_devicename` (like USB drives)
+- Falls back to `/media/ltfs_devicename` if user directory doesn't exist
+- Handles naming conflicts with timestamps
+- Auto-populates mount point field when device is selected
+- Works seamlessly with standard file browser applications
+
+**Benefits**:
+- No manual mount point entry required
+- Standard location recognized by file managers
+- Consistent with other removable media
+- Automatic conflict resolution
+
+**Location**: `ltfs_gui.py` lines 220-248, 1608-1619
+
 ## Testing and Verification
 
 ### Automated Testing
@@ -95,17 +115,26 @@ To verify the mounting fixes:
    ```bash
    python3 -c "import ltfs_gui; mgr = ltfs_gui.LTFSManager(); print(mgr.tape_drives)"
    ```
-   Expected: Basic devices (`/dev/st0`, `/dev/nst0`) appear before variants
+   Expected: Only `/dev/st0` appears as the primary device
 
-2. **Test GUI device selection**:
+2. **Test mount point auto-generation**:
+   ```bash
+   # Test the mount point generation logic
+   python3 -c "import ltfs_gui; mgr = ltfs_gui.LTFSManager(); print(mgr.generate_mount_point('/dev/st0'))"
+   ```
+   Expected: `/media/username/ltfs_st0` (standard removable media location)
+
+3. **Test GUI mounting**:
    - Start GUI: `./ltfs_gui.py`
    - Check Mount/Unmount tab
-   - Verify device selection shows appropriate defaults
+   - Device should default to `/dev/st0`
+   - Mount point should auto-populate when device is selected
+   - Mount point should be in `/media/` like USB drives
 
-3. **Test mounting with fallback**:
+4. **Test mounting process**:
    - Insert a tape
-   - Use GUI to mount (observe console output for fallback attempts)
-   - Verify successful mounting
+   - Click "Mount Tape" (no need to specify mount point manually)
+   - Verify tape appears in file manager at the auto-generated location
 
 ## Installation
 

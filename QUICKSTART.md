@@ -23,7 +23,7 @@ cd ltfs-release
 ### Optional Diagnostic Tools (for full functionality)
 ```bash
 # Install all diagnostic tools at once:
-sudo apt install sg3-utils tapeinfo lsscsi sysstat
+sudo apt install sg3-utils mtx lsscsi sysstat
 ```
 
 ## 🎯 First Time Setup
