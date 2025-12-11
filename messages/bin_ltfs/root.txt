@@ -222,7 +222,7 @@ root:table {
 		// Reserved 14445I
 		// Reserved 14446I
 		// Reserved 14447I
-		14448I:string { "    -o release_device         Clear device reservation (should be specified with -o devname" }
+		14448I:string { "    -o release_device         Clear device reservation (should be specified with -o devname)" }
 		// Reserved 14449I
 		// Reserved 14450I
 		// Reserved 14451I
