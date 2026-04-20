@@ -61,3 +61,11 @@ Window manager warning: Buggy client sent a _NET_ACTIVE_WINDOW message with a ti
 Window manager warning: WM_TRANSIENT_FOR window 0x3836a7c for 0x383f1dc window override-redirect is an override-redirect window and this is not correct according to the standard, so we'll fallback to the first non-override-redirect window 0x38357cd.
 Window manager warning: Buggy client sent a _NET_ACTIVE_WINDOW message with a timestamp of 0 for 0x8200003
 Window manager warning: Buggy client sent a _NET_ACTIVE_WINDOW message with a timestamp of 0 for 0x8200003
+Gjs-Message: 07:41:36.589: JS LOG: [LookingGlass/error] GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.cinnamon.SettingsDaemon.Power was not provided by any .service files
+Gjs-Message: 07:41:36.590: JS LOG: [LookingGlass/trace] 
+<----------------
+asyncCallback@resource:///org/gnome/gjs/modules/core/overrides/Gio.js:114:23
+---------------->
+Gjs-Message: 07:41:36.598: JS LOG: [LookingGlass/info] Removing XAppStatusIcon: :1.137 (:1.41/org/x/StatusIcon/Icon_1)
+Gjs-Message: 07:41:36.638: JS LOG: [LookingGlass/info] Removing XAppStatusIcon: mintreport (:1.95/org/x/StatusIcon/Icon)
+Gjs-Message: 07:41:36.658: JS LOG: [LookingGlass/info] Removing XAppStatusIcon: process-monitor (:1.95/org/x/StatusIcon/Icon_1)

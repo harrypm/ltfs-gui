@@ -21,15 +21,128 @@ import time
 from pathlib import Path
 
 class LTFSManager:
+    def is_tape_loaded(self, device):
+        success, _, _ = self.run_command(f'mt -f {device} status')
+        return success
+
+    def get_tape_barcode(self, device):
+        """Get tape barcode/volser using multiple detection methods"""
+        barcode = None
+        
+        # Method 1: Try tapeinfo command
+        success, stdout, _ = self.run_command(f'tapeinfo -f {device}')
+        if success:
+            for line in stdout.split('\n'):
+                line = line.strip()
+                if 'Volser' in line or 'Barcode' in line:
+                    parts = line.split(':', 1)
+                    if len(parts) > 1:
+                        barcode = parts[1].strip().strip('"\'')
+                        if barcode and barcode not in ['Unknown', 'N/A', '']:
+                            return barcode
+                # Also check for Volume1 label format
+                elif 'Volume1' in line:
+                    parts = line.split()
+                    if len(parts) > 1:
+                        potential_barcode = parts[1]
+                        if len(potential_barcode) >= 4:
+                            barcode = potential_barcode
+        
+        # Method 2: Try reading MAM barcode attribute directly
+        if not barcode or barcode == 'Unknown':
+            barcode = self.get_mam_barcode(device)
+            if barcode and barcode != 'Unknown':
+                return barcode
+        
+        # Method 3: Try sg_logs for tape alert information
+        if not barcode or barcode == 'Unknown':
+            success, stdout, _ = self.run_command(f'sg_logs -p 0x17 {device}')
+            if success:
+                # Parse for barcode information in TapeAlert logs
+                for line in stdout.split('\n'):
+                    if 'barcode' in line.lower() or 'volume' in line.lower():
+                        # Extract potential barcode from log line
+                        import re
+                        match = re.search(r'([A-Z0-9]{6,8})', line)
+                        if match:
+                            barcode = match.group(1)
+                            return barcode
+        
+        # Method 4: Try LTFS volume label if tape is already formatted
+        if not barcode or barcode == 'Unknown':
+            barcode = self.get_ltfs_volume_label(device)
+            if barcode and barcode != 'Unknown':
+                return barcode
+        
+        return barcode if barcode else 'Unknown'
+    
+    def get_mam_barcode(self, device):
+        """Get barcode from MAM attribute 0x0806"""
+        try:
+            # Read MAM attribute 0x0806 (Barcode) using sg_raw
+            success, stdout, stderr = self.run_command(
+                f"sg_raw -r 32 {device} 8C 00 00 08 06 00 00 00 20 00"
+            )
+            
+            if success and stdout.strip():
+                # Parse the hex output to extract ASCII barcode
+                hex_lines = stdout.strip().split('\n')
+                ascii_chars = []
+                
+                for line in hex_lines:
+                    # Extract hex bytes and convert to ASCII
+                    hex_bytes = re.findall(r'[0-9a-fA-F]{2}', line)
+                    for hex_byte in hex_bytes:
+                        try:
+                            byte_val = int(hex_byte, 16)
+                            # Only include printable ASCII characters
+                            if 32 <= byte_val <= 126:
+                                ascii_chars.append(chr(byte_val))
+                            elif byte_val == 0:  # Null terminator
+                                break
+                        except ValueError:
+                            continue
+                
+                barcode = ''.join(ascii_chars).strip()
+                if barcode and len(barcode) >= 4:
+                    return barcode
+        
+        except Exception as e:
+            print(f"Error reading MAM barcode: {e}")
+        
+        return None
+    
+    def get_ltfs_volume_label(self, device):
+        """Get volume label from LTFS-formatted tape"""
+        try:
+            # Try to read the LTFS label using ltfs utilities
+            success, stdout, stderr = self.run_command(f"ltfs -o devname={device} --capture-index")
+            if success:
+                # Parse for volume identifier
+                for line in stdout.split('\n'):
+                    if 'volume' in line.lower() and 'identifier' in line.lower():
+                        parts = line.split(':')
+                        if len(parts) > 1:
+                            return parts[1].strip()
+        except Exception:
+            pass
+        
+        return None
     def __init__(self):
         self.mounted_tapes = {}
         self.tape_drives = []
-        self.physical_drives = {}  # Maps physical drive to its modes
+        self.physical_drives = {}  # Maps physical drive to its modes and hardware info
+        self.drive_hardware_info = {}  # Maps device paths to hardware details
         self.single_drive_mode = False
         self.refresh_drives()
     
     def run_command(self, command, capture_output=True, shell=True):
         """Execute a shell command and return the result"""
+        # Auto-detect correct tape device for SCSI commands
+        if any(cmd in command for cmd in ['sg_inq', 'sg_vpd', 'sg_logs', 'tapeinfo']):
+            # Use SCSI generic device for these commands
+            command = self._replace_with_sg_device(command)
+        
         try:
             if capture_output:
                 result = subprocess.run(command, shell=shell, capture_output=True, text=True)
@@ -40,85 +153,75 @@ class LTFSManager:
         except Exception as e:
             return False, "", str(e)
     
+    def _replace_with_sg_device(self, command):
+        """Replace tape device paths with the correct SCSI generic device"""
+        # Map of common tape devices to their likely sg equivalents
+        device_map = {
+            '/dev/st0': '/dev/sg7',
+            '/dev/nst0': '/dev/sg7',
+            '/dev/st1': '/dev/sg8',
+            '/dev/nst1': '/dev/sg8'
+        }
+        
+        # Replace devices in the command
+        modified_command = command
+        for tape_dev, sg_dev in device_map.items():
+            if tape_dev in command:
+                # Check if sg device exists before replacing
+                if os.path.exists(sg_dev):
+                    modified_command = modified_command.replace(tape_dev, sg_dev)
+                    print(f"LTFS: Replaced {tape_dev} with {sg_dev} for SCSI command")
+                else:
+                    print(f"LTFS: Warning: SCSI device {sg_dev} not found, keeping {tape_dev}")
+        
+        return modified_command
+    
     def refresh_drives(self):
-        """Scan for available tape drives - use /dev/st0 as primary, others as overrides"""
+        """Scan for available tape drives and detect hardware information"""
         self.tape_drives = []
         self.physical_drives = {}
+        self.drive_hardware_info = {}
         permission_issues = []
         
-        # Primary device that actually works with LTFS mounting
-        primary_device = '/dev/st0'
+        # First, discover all tape devices using lsscsi
+        discovered_drives = self._discover_tape_drives()
         
-        # Check if primary device exists and is accessible
-        if Path(primary_device).exists() and Path(primary_device).is_char_device():
-            self.tape_drives.append(primary_device)
-            if not self._can_access_device(primary_device):
-                permission_issues.append(primary_device)
-        
-        # Override options - other devices that might work in specific cases
-        override_devices = []
-        
-        # Check for other /dev/st* devices (rewinding only, avoid nst* as they cause issues)
-        for device in Path('/dev').glob('st*'):
-            if (device.is_char_device() and 
-                device.name not in ['stdin', 'stdout', 'stderr'] and
-                re.match(r'st\d+[alm]?$', device.name) and
-                str(device) != primary_device):
-                device_str = str(device)
-                
+        # Process discovered drives
+        for drive_info in discovered_drives:
+            device_path = drive_info['device_path']
+            
+            # Check if device exists and is accessible
+            if Path(device_path).exists() and Path(device_path).is_char_device():
                 # Test if device responds to basic commands
-                try:
-                    result = subprocess.run(['mt', '-f', device_str, 'status'], 
-                                          capture_output=True, timeout=5)
-                    if result.returncode == 0 or 'No such device' not in result.stderr.decode():
-                        override_devices.append(device_str)
-                        
-                        # Check if we can access the device
-                        if not self._can_access_device(device_str):
-                            permission_issues.append(device_str)
-                except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
-                    # Skip devices that don't respond properly
-                    pass
+                if self._test_device_functionality(device_path):
+                    self.tape_drives.append(device_path)
+                    
+                    # Store hardware info
+                    self.drive_hardware_info[device_path] = drive_info
+                    
+                    # Check permissions
+                    if not self._can_access_device(device_path):
+                        permission_issues.append(device_path)
         
-        # Add override devices (sorted)
-        self.tape_drives.extend(sorted(override_devices))
+        # Fallback: scan /dev/st* devices if no drives discovered via lsscsi
+        if not self.tape_drives:
+            print("LTFS: No drives found via lsscsi, falling back to /dev/st* scan")
+            fallback_drives = self._fallback_device_scan()
+            self.tape_drives.extend(fallback_drives)
+            
+            # Check permissions for fallback drives
+            for device in fallback_drives:
+                if not self._can_access_device(device):
+                    permission_issues.append(device)
         
         # Store permission issues for later reference
         self.permission_issues = list(set(permission_issues))  # Remove duplicates
         
-        # Group drives by physical device
-        drive_pattern = re.compile(r'/dev/(n?)st(\d+)([alm]?)$')
-        for drive in self.tape_drives:
-            match = drive_pattern.match(drive)
-            if match:
-                rewinding = match.group(1) == ''  # Empty means rewinding (st), 'n' means non-rewinding (nst)
-                drive_num = match.group(2)
-                mode_suffix = match.group(3) or 'default'
-                
-                physical_id = f"drive{drive_num}"
-                if physical_id not in self.physical_drives:
-                    self.physical_drives[physical_id] = {
-                        'rewinding': [],
-                        'non_rewinding': [],
-                        'drive_number': drive_num
-                    }
-                
-                mode_info = {
-                    'device': drive,
-                    'mode': mode_suffix,
-                    'description': self._get_mode_description(mode_suffix)
-                }
-                
-                if rewinding:
-                    self.physical_drives[physical_id]['rewinding'].append(mode_info)
-                else:
-                    self.physical_drives[physical_id]['non_rewinding'].append(mode_info)
+        # Group drives by physical device and organize interface modes
+        self._organize_physical_drives()
         
         # Determine if we should use single drive mode
         self.single_drive_mode = len(self.physical_drives) == 1
-        
-        # Devices are already sorted by priority in the collection phase above
-        # Basic devices (st0, nst0) come first, ensuring compatibility
         
         return self.tape_drives
     
@@ -145,6 +248,534 @@ class LTFSManager:
         }
         return descriptions.get(mode_suffix, f'Mode {mode_suffix}')
     
+    def _discover_tape_drives(self):
+        """Discover tape drives using lsscsi and gather hardware information"""
+        discovered_drives = []
+        
+        try:
+            # Use lsscsi to find tape devices
+            success, stdout, stderr = self.run_command("lsscsi -g | grep tape")
+            
+            if success and stdout.strip():
+                for line in stdout.strip().split('\n'):
+                    drive_info = self._parse_lsscsi_line(line)
+                    if drive_info:
+                        # Get additional hardware details
+                        drive_info.update(self._get_drive_hardware_details(drive_info['device_path']))
+                        discovered_drives.append(drive_info)
+            
+            # If lsscsi failed or found nothing, try alternative methods
+            if not discovered_drives:
+                # Try using /sys/class/scsi_tape to find tape devices
+                discovered_drives = self._discover_via_sys_class()
+        
+        except Exception as e:
+            print(f"LTFS: Error discovering drives: {e}")
+        
+        return discovered_drives
+    
+    def _parse_lsscsi_line(self, line):
+        """Parse a line from lsscsi output to extract drive information"""
+        try:
+            # Example lsscsi line:
+            # [2:0:0:0]    tape    IBM      ULTRIUM-HH6      H7G1  /dev/st0   /dev/sg7
+            parts = line.strip().split()
+            
+            if len(parts) >= 6 and 'tape' in parts:
+                scsi_id = parts[0].strip('[]')
+                device_type = parts[1]
+                vendor = parts[2] if len(parts) > 2 else "Unknown"
+                model = parts[3] if len(parts) > 3 else "Unknown"
+                revision = parts[4] if len(parts) > 4 else "Unknown"
+                device_path = parts[5] if len(parts) > 5 else None
+                sg_device = parts[6] if len(parts) > 6 else None
+                
+                # Clean up vendor/model names
+                vendor = vendor.strip()
+                model = model.strip()
+                
+                # Determine LTO generation from model
+                lto_gen = self._extract_lto_generation(model)
+                
+                return {
+                    'scsi_id': scsi_id,
+                    'device_type': device_type,
+                    'vendor': vendor,
+                    'model': model,
+                    'revision': revision,
+                    'device_path': device_path,
+                    'sg_device': sg_device,
+                    'lto_generation': lto_gen,
+                    'display_name': f"{vendor} {model}"
+                }
+        except Exception as e:
+            print(f"LTFS: Error parsing lsscsi line '{line}': {e}")
+        
+        return None
+    
+    def _extract_lto_generation(self, model):
+        """Extract LTO generation from model string"""
+        # Common patterns for LTO generation identification
+        lto_patterns = {
+            'LTO-9': 'LTO-9',
+            'LTO-8': 'LTO-8', 
+            'LTO-7': 'LTO-7',
+            'LTO-6': 'LTO-6',
+            'LTO-5': 'LTO-5',
+            'LTO-4': 'LTO-4',
+            'LTO-3': 'LTO-3',
+            'ULTRIUM-HH9': 'LTO-9',
+            'ULTRIUM-HH8': 'LTO-8',
+            'ULTRIUM-HH7': 'LTO-7',
+            'ULTRIUM-HH6': 'LTO-6',
+            'ULTRIUM-HH5': 'LTO-5',
+            'ULTRIUM-HH4': 'LTO-4',
+            'ULTRIUM-HH3': 'LTO-3',
+        }
+        
+        model_upper = model.upper()
+        for pattern, generation in lto_patterns.items():
+            if pattern in model_upper:
+                return generation
+        
+        return "Unknown"
+    
+    def _get_drive_hardware_details(self, device_path):
+        """Get additional hardware details for a drive"""
+        details = {
+            'serial_number': 'Unknown',
+            'firmware_version': 'Unknown',
+            'wwn': 'Unknown'
+        }
+        
+        if not device_path:
+            return details
+        
+        try:
+            # Method 1: Try to get serial number using sg_inq with VPD page 0x80
+            success, stdout, stderr = self.run_command(f"sg_inq -p 0x80 {device_path}")
+            if success and stdout:
+                serial = self._extract_serial_from_sg_inq(stdout)
+                if serial:
+                    details['serial_number'] = serial
+            
+            # Method 2: If no serial found, try VPD page 0x83 (Device Identification)
+            if details['serial_number'] == 'Unknown':
+                success, stdout, stderr = self.run_command(f"sg_inq -p 0x83 {device_path}")
+                if success and stdout:
+                    serial = self._extract_serial_from_device_id(stdout)
+                    if serial:
+                        details['serial_number'] = serial
+            
+            # Method 3: Try using sg_vpd for serial number
+            if details['serial_number'] == 'Unknown':
+                success, stdout, stderr = self.run_command(f"sg_vpd -p sn {device_path}")
+                if success and stdout:
+                    serial = self._extract_serial_from_sg_vpd(stdout)
+                    if serial:
+                        details['serial_number'] = serial
+            
+            # Method 4: Try tapeinfo command for serial number
+            if details['serial_number'] == 'Unknown':
+                success, stdout, stderr = self.run_command(f"tapeinfo -f {device_path}")
+                if success and stdout:
+                    serial = self._extract_serial_from_tapeinfo(stdout)
+                    if serial:
+                        details['serial_number'] = serial
+            
+            # Get firmware version and other details using standard inquiry
+            success, stdout, stderr = self.run_command(f"sg_inq {device_path}")
+            if success and stdout:
+                fw_version = self._extract_firmware_version(stdout)
+                if fw_version:
+                    details['firmware_version'] = fw_version
+        
+        except Exception as e:
+            print(f"LTFS: Error getting hardware details for {device_path}: {e}")
+        
+        return details
+    
+    def _extract_serial_from_sg_inq(self, sg_inq_output):
+        """Extract serial number from sg_inq VPD page 0x80 output"""
+        try:
+            lines = sg_inq_output.split('\n')
+            for i, line in enumerate(lines):
+                line = line.strip()
+                
+                # Look for the Unit serial number line
+                if 'Unit serial number' in line and ':' in line:
+                    # Extract everything after the colon
+                    parts = line.split(':', 1)
+                    if len(parts) > 1:
+                        serial = parts[1].strip()
+                        # Remove quotes and extra whitespace
+                        serial = serial.strip('"\'\'').strip()
+                        
+                        # Validate the serial number
+                        if (serial and 
+                            serial not in ['VPD INQUIRY page', 'Unit serial number page', 'page'] and
+                            len(serial) >= 4 and 
+                            len(serial) <= 32 and
+                            re.match(r'^[A-Za-z0-9]+$', serial)):
+                            return serial
+                
+                # Look for serial in the next few lines after "Unit serial number" header
+                elif 'Unit serial number' in line and i + 1 < len(lines):
+                    # Check the next line for the actual serial
+                    next_line = lines[i + 1].strip()
+                    if next_line and re.match(r'^[A-Za-z0-9]{4,32}$', next_line):
+                        return next_line
+                
+                # Look for lines that contain only valid serial number characters
+                elif (re.match(r'^[A-Z0-9]{6,20}$', line) and 
+                      line not in ['VPD', 'INQUIRY', 'PAGE']):
+                    return line
+                
+                # Look for hex data that might contain ASCII serial
+                elif re.match(r'^[0-9a-fA-F\s]{20,}$', line):
+                    serial = self._extract_ascii_from_hex(line)
+                    if (serial and 
+                        len(serial) >= 4 and 
+                        serial not in ['VPD INQUIRY page', 'Unit serial number page']):
+                        return serial
+        except Exception:
+            pass
+        return None
+    
+    def _extract_serial_from_device_id(self, sg_inq_output):
+        """Extract serial number from sg_inq VPD page 0x83 (Device Identification) output"""
+        try:
+            lines = sg_inq_output.split('\n')
+            for i, line in enumerate(lines):
+                line = line.strip()
+                if 'vendor specific' in line.lower() or 'T10 vendor identification' in line:
+                    # Look for serial in the next few lines
+                    for j in range(i+1, min(i+5, len(lines))):
+                        next_line = lines[j].strip()
+                        # Look for patterns that might be serial numbers
+                        if re.search(r'[A-Z0-9]{6,}', next_line):
+                            potential_serial = re.search(r'[A-Z0-9]{6,}', next_line).group()
+                            if len(potential_serial) >= 6 and len(potential_serial) <= 20:
+                                return potential_serial
+        except Exception:
+            pass
+        return None
+    
+    def _extract_serial_from_sg_vpd(self, sg_vpd_output):
+        """Extract serial number from sg_vpd -p sn output"""
+        try:
+            lines = sg_vpd_output.split('\n')
+            for i, line in enumerate(lines):
+                line = line.strip()
+                
+                # Look for Unit serial number with colon
+                if 'Unit serial number' in line and ':' in line:
+                    serial = line.split(':', 1)[1].strip()
+                    # Remove any non-alphanumeric characters
+                    serial = re.sub(r'[^A-Za-z0-9]', '', serial)
+                    if (serial and 
+                        len(serial) >= 4 and 
+                        len(serial) <= 32 and
+                        serial.upper() not in ['UNITNUMBER', 'SERIALNUMBER', 'VPDINQUIRY']):
+                        return serial
+                
+                # Look for serial in the line after "Unit serial number"
+                elif 'Unit serial number' in line and i + 1 < len(lines):
+                    next_line = lines[i + 1].strip()
+                    # Clean and validate
+                    next_line = re.sub(r'[^A-Za-z0-9]', '', next_line)
+                    if (next_line and 
+                        len(next_line) >= 4 and 
+                        len(next_line) <= 32):
+                        return next_line
+                
+                # Look for standalone alphanumeric serial numbers
+                elif (re.match(r'^[A-Z0-9]{6,20}$', line) and
+                      line.upper() not in ['VPD', 'INQUIRY', 'PAGE', 'SERIAL', 'NUMBER']):
+                    return line
+        except Exception:
+            pass
+        return None
+    
+    def _extract_serial_from_tapeinfo(self, tapeinfo_output):
+        """Extract serial number from tapeinfo output"""
+        try:
+            for line in tapeinfo_output.split('\n'):
+                line = line.strip()
+                if 'serial' in line.lower() and ('number' in line.lower() or 'num' in line.lower()):
+                    # Look for serial number patterns
+                    if ':' in line:
+                        serial = line.split(':', 1)[1].strip()
+                        # Clean up and validate
+                        serial = re.sub(r'[^A-Za-z0-9]', '', serial)
+                        if serial and len(serial) >= 4 and len(serial) <= 20:
+                            return serial
+                    # Look for patterns like "Serial: ABC123" or "S/N: ABC123"
+                    match = re.search(r'(?:serial|s/n)\s*:?\s*([A-Z0-9]{4,20})', line, re.IGNORECASE)
+                    if match:
+                        return match.group(1)
+        except Exception:
+            pass
+        return None
+    
+    def _extract_ascii_from_hex(self, hex_line):
+        """Extract ASCII string from hex data line"""
+        try:
+            # Remove spaces and convert hex to ASCII
+            hex_chars = re.findall(r'[0-9a-fA-F]{2}', hex_line)
+            ascii_chars = []
+            for hex_char in hex_chars:
+                try:
+                    char_val = int(hex_char, 16)
+                    # Only include printable ASCII characters
+                    if 32 <= char_val <= 126:
+                        ascii_chars.append(chr(char_val))
+                    elif char_val == 0:  # Null terminator
+                        break
+                except ValueError:
+                    continue
+            
+            ascii_string = ''.join(ascii_chars).strip()
+            
+            # Look for patterns that might be serial numbers
+            if ascii_string and len(ascii_string) >= 4:
+                # Filter out common non-serial text
+                invalid_strings = [
+                    'unit serial number page', 'vpd inquiry page', 'serial number',
+                    'unit serial', 'inquiry page', 'page', 'vpd', 'inquiry',
+                    'vendor', 'product', 'revision'
+                ]
+                
+                ascii_lower = ascii_string.lower()
+                if not any(invalid in ascii_lower for invalid in invalid_strings):
+                    # Check if it looks like a serial number (alphanumeric)
+                    if re.match(r'^[A-Za-z0-9]{4,20}$', ascii_string):
+                        return ascii_string
+        except Exception:
+            pass
+        return None
+    
+    def _extract_firmware_version(self, sg_inq_output):
+        """Extract firmware version from sg_inq output"""
+        try:
+            for line in sg_inq_output.split('\n'):
+                if 'Product revision level' in line:
+                    # Extract revision after the colon
+                    parts = line.split(':')
+                    if len(parts) > 1:
+                        revision = parts[1].strip()
+                        return revision if revision else None
+        except Exception:
+            pass
+        return None
+    
+    def _discover_via_sys_class(self):
+        """Alternative discovery method using /sys/class/scsi_tape"""
+        discovered_drives = []
+        
+        try:
+            sys_tape_path = Path('/sys/class/scsi_tape')
+            if sys_tape_path.exists():
+                for tape_dir in sys_tape_path.iterdir():
+                    if tape_dir.is_dir():
+                        # Extract device number (e.g., st0 from /sys/class/scsi_tape/st0)
+                        device_name = tape_dir.name
+                        device_path = f'/dev/{device_name}'
+                        
+                        if Path(device_path).exists():
+                            # Try to get basic info
+                            drive_info = {
+                                'scsi_id': 'Unknown',
+                                'device_type': 'tape',
+                                'vendor': 'Unknown',
+                                'model': 'Unknown',
+                                'revision': 'Unknown',
+                                'device_path': device_path,
+                                'sg_device': None,
+                                'lto_generation': 'Unknown',
+                                'display_name': f'Tape Drive ({device_name})'
+                            }
+                            
+                            # Try to get hardware details
+                            drive_info.update(self._get_drive_hardware_details(device_path))
+                            discovered_drives.append(drive_info)
+        
+        except Exception as e:
+            print(f"LTFS: Error discovering via /sys/class: {e}")
+        
+        return discovered_drives
+    
+    def _fallback_device_scan(self):
+        """Fallback method to scan /dev/st* devices directly"""
+        fallback_drives = []
+        
+        # Primary device that actually works with LTFS mounting
+        primary_device = '/dev/st0'
+        
+        # Check if primary device exists and is accessible
+        if Path(primary_device).exists() and Path(primary_device).is_char_device():
+            if self._test_device_functionality(primary_device):
+                fallback_drives.append(primary_device)
+                # Create basic hardware info for fallback device
+                self.drive_hardware_info[primary_device] = {
+                    'scsi_id': 'Unknown',
+                    'device_type': 'tape',
+                    'vendor': 'Unknown',
+                    'model': 'Unknown',
+                    'revision': 'Unknown',
+                    'device_path': primary_device,
+                    'sg_device': None,
+                    'lto_generation': 'Unknown',
+                    'display_name': f'Tape Drive (st0)',
+                    'serial_number': 'Unknown',
+                    'firmware_version': 'Unknown',
+                    'wwn': 'Unknown'
+                }
+        
+        # Check for other /dev/st* devices (rewinding only, avoid nst* as they cause issues)
+        for device in Path('/dev').glob('st*'):
+            if (device.is_char_device() and 
+                device.name not in ['stdin', 'stdout', 'stderr'] and
+                re.match(r'st\d+[alm]?$', device.name) and
+                str(device) != primary_device):
+                device_str = str(device)
+                
+                if self._test_device_functionality(device_str):
+                    fallback_drives.append(device_str)
+                    # Create basic hardware info for fallback device
+                    self.drive_hardware_info[device_str] = {
+                        'scsi_id': 'Unknown',
+                        'device_type': 'tape',
+                        'vendor': 'Unknown',
+                        'model': 'Unknown',
+                        'revision': 'Unknown',
+                        'device_path': device_str,
+                        'sg_device': None,
+                        'lto_generation': 'Unknown',
+                        'display_name': f'Tape Drive ({os.path.basename(device_str)})',
+                        'serial_number': 'Unknown',
+                        'firmware_version': 'Unknown',
+                        'wwn': 'Unknown'
+                    }
+        
+        return sorted(fallback_drives)
+    
+    def _test_device_functionality(self, device_path):
+        """Test if a device responds to basic commands"""
+        try:
+            result = subprocess.run(['mt', '-f', device_path, 'status'], 
+                                  capture_output=True, timeout=5)
+            return result.returncode == 0 or 'No such device' not in result.stderr.decode()
+        except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+            return False
+    
+    def _organize_physical_drives(self):
+        """Organize drives by physical device and create logical groupings"""
+        drive_pattern = re.compile(r'/dev/(n?)st(\d+)([alm]?)$')
+        
+        for device_path in self.tape_drives:
+            match = drive_pattern.match(device_path)
+            if match:
+                rewinding = match.group(1) == ''  # Empty means rewinding (st), 'n' means non-rewinding (nst)
+                drive_num = match.group(2)
+                mode_suffix = match.group(3) or 'default'
+                
+                physical_id = f"drive{drive_num}"
+                
+                # Get hardware info for this device
+                hw_info = self.drive_hardware_info.get(device_path, {})
+                
+                if physical_id not in self.physical_drives:
+                    self.physical_drives[physical_id] = {
+                        'drive_number': drive_num,
+                        'hardware_info': hw_info,
+                        'primary_device': device_path,  # Use first device as primary
+                        'rewinding': [],
+                        'non_rewinding': [],
+                        'interface_devices': []  # All related interface devices
+                    }
+                else:
+                    # Update with better hardware info if available
+                    if hw_info.get('vendor', 'Unknown') != 'Unknown':
+                        self.physical_drives[physical_id]['hardware_info'] = hw_info
+                
+                mode_info = {
+                    'device': device_path,
+                    'mode': mode_suffix,
+                    'description': self._get_mode_description(mode_suffix)
+                }
+                
+                # Add to interface devices list
+                self.physical_drives[physical_id]['interface_devices'].append(device_path)
+                
+                if rewinding:
+                    self.physical_drives[physical_id]['rewinding'].append(mode_info)
+                else:
+                    self.physical_drives[physical_id]['non_rewinding'].append(mode_info)
+    
+    def get_drive_display_info(self, device_path):
+        """Get formatted display information for a drive"""
+        hw_info = self.drive_hardware_info.get(device_path, {})
+        
+        # Create display name
+        vendor = hw_info.get('vendor', 'Unknown')
+        model = hw_info.get('model', 'Unknown')
+        lto_gen = hw_info.get('lto_generation', '')
+        serial = hw_info.get('serial_number', 'Unknown')
+        
+        if vendor != 'Unknown' and model != 'Unknown':
+            if lto_gen and lto_gen != 'Unknown':
+                display_name = f"{vendor} {model} ({lto_gen})"
+            else:
+                display_name = f"{vendor} {model}"
+        else:
+            display_name = f"Tape Drive ({os.path.basename(device_path)})"
+        
+        # Add serial if available
+        if serial != 'Unknown':
+            display_name += f" [S/N: {serial}]"
+        
+        return {
+            'display_name': display_name,
+            'device_path': device_path,
+            'vendor': vendor,
+            'model': model,
+            'lto_generation': lto_gen,
+            'serial_number': serial,
+            'firmware_version': hw_info.get('firmware_version', 'Unknown')
+        }
+    
+    def get_physical_drives_display_list(self):
+        """Get a list of physical drives for display in GUI"""
+        display_list = []
+        
+        for physical_id, drive_info in self.physical_drives.items():
+            hw_info = drive_info.get('hardware_info', {})
+            primary_device = drive_info.get('primary_device')
+            interface_devices = drive_info.get('interface_devices', [])
+            
+            # Get display info for the primary device
+            display_info = self.get_drive_display_info(primary_device)
+            
+            # Add interface information
+            interfaces = ', '.join([os.path.basename(dev) for dev in interface_devices])
+            
+            display_entry = {
+                'display_name': display_info['display_name'],
+                'primary_device': primary_device,
+                'interface_devices': interface_devices,
+                'interfaces_summary': f"Interfaces: {interfaces}",
+                'hardware_info': hw_info,
+                'vendor': display_info['vendor'],
+                'model': display_info['model'],
+                'lto_generation': display_info['lto_generation'],
+                'serial_number': display_info['serial_number']
+            }
+            
+            display_list.append(display_entry)
+        
+        return display_list
+    
     def get_tape_info(self, device):
         """Get information about a tape in the specified device"""
         success, stdout, stderr = self.run_command(f"mt -f {device} status")
@@ -152,25 +783,83 @@ class LTFSManager:
             return stdout
         return f"Error: {stderr}"
     
-    def format_tape(self, device, label="", force=False):
+    def format_tape(self, device, label="", barcode="", force=False, block_size=None, compression=True):
         """Format a tape with LTFS"""
         cmd = f"mkltfs -d {device}"
+        
+        # Add label if provided
         if label:
             cmd += f" -n '{label}'"
+        
+        # Add force flag if requested
         if force:
             cmd += " -f"
         
-        # Check if this is a Quantum LTO drive and use optimal block size
-        success, stdout, stderr = self.run_command(f"sg_inq {device}")
-        if success and "QUANTUM" in stdout:
-            # Use smaller block size for Quantum LTO drives for better compatibility
-            cmd += " -b 65536"
-            print(f"Detected Quantum LTO drive, using 64KB block size for better compatibility")
+        # Add compression flag
+        if not compression:
+            cmd += " --no-compression"
         
-        return self.run_command(cmd)
+        # Handle block size
+        if block_size and block_size != "auto":
+            cmd += f" -b {block_size}"
+        elif block_size == "auto" or not block_size:
+            # Check if this is a Quantum LTO drive and use optimal block size
+            success, stdout, stderr = self.run_command(f"sg_inq {device}")
+            if success and "QUANTUM" in stdout:
+                # Use smaller block size for Quantum LTO drives for better compatibility
+                cmd += " -b 65536"
+                print(f"Detected Quantum LTO drive, using 64KB block size for better compatibility")
+            # For other drives, let mkltfs choose the optimal block size
+        
+        # Execute the format command
+        format_success, format_stdout, format_stderr = self.run_command(cmd)
+        
+        # If format was successful and barcode was provided, set the MAM barcode
+        if format_success and barcode:
+            print(f"Format successful, setting MAM barcode: {barcode}")
+            barcode_success = self._set_mam_barcode(device, barcode)
+            if not barcode_success:
+                print(f"Warning: Format successful but failed to set MAM barcode")
+                # Don't fail the entire operation for barcode issues
+        
+        return format_success, format_stdout, format_stderr
     
-    def mount_tape(self, device, mount_point, options=""):
-        """Mount an LTFS tape"""
+    def _set_mam_barcode(self, device, barcode):
+        """Set MAM barcode attribute (0x0806) on the tape"""
+        try:
+            # Convert barcode to hex bytes
+            barcode_bytes = barcode.encode('ascii')
+            hex_data = ' '.join(f'{b:02x}' for b in barcode_bytes)
+            
+            # Use sg_raw to write MAM attribute 0x0806 (Barcode)
+            # Command: WRITE ATTRIBUTE (0x8D)
+            cmd = f"sg_raw -s {len(barcode_bytes)} {device} 8D 00 00 08 06 00 00 {hex_data}"
+            
+            success, stdout, stderr = self.run_command(cmd)
+            
+            if success:
+                print(f"Successfully set MAM barcode to: {barcode}")
+                return True
+            else:
+                print(f"Failed to set MAM barcode: {stderr}")
+                
+                # Try alternative method using tapeutil if available
+                alt_cmd = f"tapeutil -f {device} setparam barcode {barcode}"
+                alt_success, alt_stdout, alt_stderr = self.run_command(alt_cmd)
+                
+                if alt_success:
+                    print(f"Successfully set MAM barcode using tapeutil: {barcode}")
+                    return True
+                else:
+                    print(f"Alternative MAM barcode method also failed: {alt_stderr}")
+                    return False
+        
+        except Exception as e:
+            print(f"Exception setting MAM barcode: {e}")
+            return False
+    
+    def mount_tape(self, device, mount_point, options="", auto_open=True):
+        """Mount an LTFS tape like removable media"""
         # Create mount point if it doesn't exist
         # Handle /media/ locations that may require sudo
         if mount_point.startswith('/media/'):
@@ -197,14 +886,20 @@ class LTFSManager:
         if not rewind_success:
             print(f"Warning: Could not rewind {device}")
         
+        # Enhanced mount options for better compatibility
+        enhanced_options = options
+        if not enhanced_options:
+            username = os.getenv('USER', 'user')
+            uid = os.getuid()
+            gid = os.getgid()
+            enhanced_options = f"-o uid={uid},gid={gid},allow_other"
+        
         # Try mounting with different options to handle compatibility issues
-        # Special handling for Quantum LTO drives that may have compatibility issues
-        # Use sudo for LTFS mounting as it typically requires elevated privileges
         mount_commands = [
-            f"sudo ltfs -o devname={device} {options} {mount_point}",
-            f"sudo ltfs -o devname={device},force_mount_no_eod {options} {mount_point}",
-            f"sudo ltfs -o devname={device},sync_type=unmount {options} {mount_point}",
-            f"sudo ltfs -o devname={device},force_mount_no_eod,sync_type=unmount {options} {mount_point}"
+            f"sudo ltfs -o devname={device} {enhanced_options} '{mount_point}'",
+            f"sudo ltfs -o devname={device},force_mount_no_eod {enhanced_options} '{mount_point}'",
+            f"sudo ltfs -o devname={device},sync_type=unmount {enhanced_options} '{mount_point}'",
+            f"sudo ltfs -o devname={device},force_mount_no_eod,sync_type=unmount {enhanced_options} '{mount_point}'"
         ]
         
         success = False
@@ -219,13 +914,108 @@ class LTFSManager:
             print(f"Mount attempt failed: {stderr}")
         
         if success:
+            # Store mount information
             self.mounted_tapes[mount_point] = {
                 'device': device,
                 'mount_point': mount_point,
-                'options': options
+                'options': enhanced_options,
+                'mount_time': time.time()
             }
+            
+            # Create desktop shortcut if mounted in /media/
+            if mount_point.startswith('/media/'):
+                self.create_desktop_shortcut(mount_point, device)
+            
+            # Automatically open in file manager if requested
+            if auto_open:
+                self.auto_open_mount_point(mount_point)
+            
+            # Send desktop notification
+            self.send_mount_notification(mount_point, device, True)
+        else:
+            # Send failure notification
+            self.send_mount_notification(mount_point, device, False)
         
         return success, stdout, stderr
+    
+    def create_desktop_shortcut(self, mount_point, device):
+        """Create a desktop shortcut for the mounted tape"""
+        try:
+            username = os.getenv('USER', 'user')
+            desktop_path = f"/home/{username}/Desktop"
+            
+            if os.path.exists(desktop_path):
+                mount_name = os.path.basename(mount_point)
+                shortcut_path = os.path.join(desktop_path, f"{mount_name}.desktop")
+                
+                # Get LTO generation for icon
+                lto_gen = self.detect_lto_generation(device)
+                icon_name = "media-tape" if lto_gen != "Unknown" else "folder"
+                
+                desktop_content = f"""[Desktop Entry]
+Version=1.0
+Type=Link
+Name={mount_name}
+Comment=LTFS Tape ({device})
+URL=file://{mount_point}
+Icon={icon_name}
+Categories=System;
+"""
+                
+                with open(shortcut_path, 'w') as f:
+                    f.write(desktop_content)
+                
+                # Make it executable
+                os.chmod(shortcut_path, 0o755)
+                
+                print(f"Created desktop shortcut: {shortcut_path}")
+        except Exception as e:
+            print(f"Could not create desktop shortcut: {e}")
+    
+    def auto_open_mount_point(self, mount_point):
+        """Automatically open the mount point in file manager"""
+        try:
+            # Try different file managers
+            file_managers = ['nemo', 'nautilus', 'dolphin', 'thunar', 'pcmanfm', 'xdg-open']
+            
+            for fm in file_managers:
+                try:
+                    subprocess.run([fm, mount_point], check=True, 
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    print(f"Opened {mount_point} in {fm}")
+                    return
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    continue
+            
+            print(f"Could not auto-open {mount_point} - no suitable file manager found")
+        except Exception as e:
+            print(f"Error auto-opening mount point: {e}")
+    
+    def send_mount_notification(self, mount_point, device, success):
+        """Send desktop notification about mount status"""
+        try:
+            mount_name = os.path.basename(mount_point)
+            
+            if success:
+                title = "LTFS Tape Mounted"
+                message = f"'{mount_name}' is now available"
+                icon = "media-tape"
+            else:
+                title = "LTFS Mount Failed"
+                message = f"Could not mount tape from {device}"
+                icon = "dialog-error"
+            
+            # Try to send notification using notify-send
+            subprocess.run([
+                'notify-send', 
+                '--icon', icon,
+                '--app-name', 'LTFS Manager',
+                title, message
+            ], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+        except Exception:
+            # Notification failed, but don't error out
+            pass
     
     def unmount_tape(self, mount_point):
         """Unmount an LTFS tape"""
@@ -252,8 +1042,8 @@ class LTFSManager:
         
         return success, stdout, stderr
     
-    def generate_mount_point(self, device):
-        """Generate a mount point in /media/username/ like standard removable media"""
+    def generate_mount_point(self, device, tape_label=None, lto_generation=None):
+        """Generate a user-friendly mount point like optical drives/USB drives"""
         import time
         import os
         
@@ -261,54 +1051,132 @@ class LTFSManager:
         device_name = os.path.basename(device)
         username = os.getenv('USER', 'user')
         
-        # Primary location: /media/username/ (like USB drives)
+        # Get tape information for better naming
+        tape_info = self.get_tape_volume_info(device)
+        volume_label = tape_info.get('volume_label')
+        
+        # Generate a descriptive mount name
+        if volume_label and volume_label.strip():
+            # Use tape's volume label if available
+            mount_name = self.sanitize_mount_name(volume_label)
+        elif tape_label and tape_label.strip():
+            # Use provided label
+            mount_name = self.sanitize_mount_name(tape_label)
+        else:
+            # Generate descriptive name based on LTO type
+            lto_type = lto_generation or self.detect_lto_generation(device)
+            if lto_type and lto_type != 'Unknown':
+                mount_name = f"{lto_type}_Tape"
+            else:
+                mount_name = "LTFS_Tape"
+        
+        # Primary location: /media/username/ (like USB drives and optical media)
         media_user_path = f"/media/{username}"
         
-        # Try to create /media/username if it doesn't exist
+        # Ensure media directory exists with proper permissions
+        success = self.ensure_media_directory(media_user_path)
+        
+        if success:
+            mount_point = os.path.join(media_user_path, mount_name)
+            
+            # Handle naming conflicts by adding numbers
+            counter = 1
+            original_mount_point = mount_point
+            while os.path.exists(mount_point):
+                mount_point = f"{original_mount_point}_{counter}"
+                counter += 1
+            
+            return mount_point
+        
+        # Fallback to desktop if media directory unavailable
+        desktop_path = f"/home/{username}/Desktop"
+        if os.path.exists(desktop_path) and os.access(desktop_path, os.W_OK):
+            mount_point = os.path.join(desktop_path, mount_name)
+            counter = 1
+            original_mount_point = mount_point
+            while os.path.exists(mount_point):
+                mount_point = f"{original_mount_point}_{counter}"
+                counter += 1
+            return mount_point
+        
+        # Final fallback - user home directory
+        home_mount_point = f"/home/{username}/{mount_name}"
+        counter = 1
+        original_mount_point = home_mount_point
+        while os.path.exists(home_mount_point):
+            home_mount_point = f"{original_mount_point}_{counter}"
+            counter += 1
+        
+        return home_mount_point
+    
+    def get_tape_volume_info(self, device):
+        """Get volume information from the tape"""
+        volume_info = {
+            'volume_label': None,
+            'capacity': None,
+            'used_space': None
+        }
+        
         try:
-            if not os.path.exists(media_user_path):
-                # Try to create the user media directory
-                os.makedirs(media_user_path, mode=0o755, exist_ok=True)
-                print(f"Created media directory: {media_user_path}")
+            # Try to get volume label using ltfs command
+            success, stdout, stderr = self.run_command(f"ltfs -o devname={device} --help")
+            
+            # Try alternative methods to get tape info
+            success, stdout, stderr = self.run_command(f"tapeinfo -f {device}")
+            if success:
+                for line in stdout.split('\n'):
+                    if 'volume' in line.lower() and 'label' in line.lower():
+                        parts = line.split(':')
+                        if len(parts) > 1:
+                            volume_info['volume_label'] = parts[1].strip()
+                            break
+        except Exception:
+            pass
+        
+        return volume_info
+    
+    def sanitize_mount_name(self, name):
+        """Sanitize a name for use as a mount point"""
+        import re
+        # Remove invalid characters and replace with underscores
+        sanitized = re.sub(r'[^A-Za-z0-9_\-]', '_', name)
+        # Remove multiple consecutive underscores
+        sanitized = re.sub(r'_+', '_', sanitized)
+        # Remove leading/trailing underscores
+        sanitized = sanitized.strip('_')
+        # Ensure it's not empty
+        if not sanitized:
+            sanitized = "LTFS_Tape"
+        return sanitized
+    
+    def detect_lto_generation(self, device):
+        """Detect LTO generation from device information"""
+        hw_info = self.drive_hardware_info.get(device, {})
+        return hw_info.get('lto_generation', 'Unknown')
+    
+    def ensure_media_directory(self, media_path):
+        """Ensure media directory exists with proper permissions"""
+        try:
+            if not os.path.exists(media_path):
+                # Try to create with sudo if needed
+                success, stdout, stderr = self.run_command(f"sudo mkdir -p '{media_path}'")
+                if not success:
+                    print(f"Failed to create media directory: {stderr}")
+                    return False
+                
+                # Set proper ownership
+                username = os.getenv('USER', 'user')
+                success, stdout, stderr = self.run_command(f"sudo chown {username}:{username} '{media_path}'")
+                if not success:
+                    print(f"Warning: Could not set ownership of {media_path}")
+                
+                print(f"Created media directory: {media_path}")
             
             # Check if we can write to it
-            if os.access(media_user_path, os.W_OK):
-                mount_name = f"ltfs_{device_name}"
-                mount_point = os.path.join(media_user_path, mount_name)
-                
-                # If path exists, add timestamp to make it unique
-                if os.path.exists(mount_point):
-                    timestamp = int(time.time())
-                    mount_name = f"ltfs_{device_name}_{timestamp}"
-                    mount_point = os.path.join(media_user_path, mount_name)
-                
-                return mount_point
-        except PermissionError:
-            print(f"Cannot create {media_user_path} - permission denied")
+            return os.access(media_path, os.W_OK)
         except Exception as e:
-            print(f"Error creating {media_user_path}: {e}")
-        
-        # Fallback locations if /media/username/ isn't accessible
-        fallback_candidates = [
-            f"/home/{username}/ltfs_{device_name}",  # User home directory
-            f"/tmp/ltfs_{device_name}_{username}",   # Temp directory with username
-        ]
-        
-        for candidate in fallback_candidates:
-            parent_dir = os.path.dirname(candidate)
-            if os.path.exists(parent_dir) and os.access(parent_dir, os.W_OK):
-                mount_point = candidate
-                # If path exists, add timestamp to make it unique
-                if os.path.exists(mount_point):
-                    timestamp = int(time.time())
-                    base_name = os.path.basename(candidate)
-                    mount_point = os.path.join(parent_dir, f"{base_name}_{timestamp}")
-                
-                return mount_point
-        
-        # Final fallback - use temp directory with timestamp
-        timestamp = int(time.time())
-        return f"/tmp/ltfs_{device_name}_{username}_{timestamp}"
+            print(f"Error ensuring media directory: {e}")
+            return False
     
     def list_mounted_tapes(self):
         """List currently mounted LTFS tapes"""
@@ -316,6 +1184,14 @@ class LTFSManager:
         return stdout if success else ""
 
 class LTFSGui:
+    def refresh_tape_status(self):
+        device = self.get_selected_device()
+        if device and self.ltfs_manager.is_tape_loaded(device):
+            barcode = self.ltfs_manager.get_tape_barcode(device)
+            self.tape_status_label.config(text=f'Tape Loaded: {barcode}', foreground='green')
+        else:
+            self.tape_status_label.config(text='No Tape Loaded', foreground='red')
+        self.root.after(5000, self.refresh_tape_status)
     def __init__(self, root):
         self.root = root
         self.root.title("LTFS Manager")
@@ -435,6 +1311,13 @@ class LTFSGui:
         self.ltfs_manager = LTFSManager()
         self.setup_ui()
         
+        # Add tape status label at the bottom
+        self.tape_status_label = ttk.Label(self.root, text="Tape Status: Unknown", anchor='w')
+        self.tape_status_label.pack(side='bottom', fill='x', padx=10, pady=5)
+        
+        # Start tape status monitoring after UI is fully setup
+        self.refresh_tape_status()
+        
         # Apply the saved/detected theme
         self.apply_selected_theme()
         self.refresh_drives()
@@ -525,20 +1408,25 @@ class LTFSGui:
     def setup_mount_tab(self):
         """Set up the mount/unmount tab"""
         # Mount section
-        mount_section = ttk.LabelFrame(self.mount_frame, text="Mount Tape", padding=10)
+        mount_section = ttk.LabelFrame(self.mount_frame, text="Mount Tape (Like Optical Drive)", padding=10)
         mount_section.pack(fill='x', padx=10, pady=10)
+        
+        # Info label
+        info_text = "Tapes will be mounted like removable media (USB drives/CDs) and appear in your file manager."
+        info_label = ttk.Label(mount_section, text=info_text, font=('Arial', 9), foreground='#666666')
+        info_label.grid(row=0, column=0, columnspan=3, sticky='w', pady=(0, 10))
         
         # Device/Mode selection (will be updated based on drive count)
         self.device_label = ttk.Label(mount_section, text="Device:")
-        self.device_label.grid(row=0, column=0, sticky='w', pady=5)
+        self.device_label.grid(row=1, column=0, sticky='w', pady=5)
         self.mount_device_var = tk.StringVar()
         self.mount_device_combo = ttk.Combobox(mount_section, textvariable=self.mount_device_var, width=30)
-        self.mount_device_combo.grid(row=0, column=1, sticky='ew', padx=(10, 0), pady=5)
+        self.mount_device_combo.grid(row=1, column=1, sticky='ew', padx=(10, 0), pady=5)
         self.mount_device_combo.bind('<<ComboboxSelected>>', self.on_device_selected)
         
         # Mode selection frame (initially hidden)
         self.mode_frame = ttk.Frame(mount_section)
-        self.mode_frame.grid(row=1, column=0, columnspan=3, sticky='ew', pady=5)
+        self.mode_frame.grid(row=2, column=0, columnspan=3, sticky='ew', pady=5)
         
         # Rewinding mode selection
         self.rewinding_var = tk.StringVar(value="non_rewinding")
@@ -553,19 +1441,30 @@ class LTFSGui:
         self.density_mode_combo.grid(row=1, column=1, columnspan=2, sticky='ew', padx=(0, 0), pady=(5, 0))
         
         # Mount point
-        ttk.Label(mount_section, text="Mount Point:").grid(row=2, column=0, sticky='w', pady=5)
+        ttk.Label(mount_section, text="Mount Point:").grid(row=3, column=0, sticky='w', pady=5)
         self.mount_point_var = tk.StringVar(value="")
         self.mount_point_entry = ttk.Entry(mount_section, textvariable=self.mount_point_var, width=30)
-        self.mount_point_entry.grid(row=2, column=1, sticky='ew', padx=(10, 0), pady=5)
-        ttk.Button(mount_section, text="Browse", command=self.browse_mount_point).grid(row=2, column=2, padx=(5, 0), pady=5)
+        self.mount_point_entry.grid(row=3, column=1, sticky='ew', padx=(10, 0), pady=5)
+        ttk.Button(mount_section, text="Browse", command=self.browse_mount_point).grid(row=3, column=2, padx=(5, 0), pady=5)
         
-        # Mount options
-        ttk.Label(mount_section, text="Options:").grid(row=3, column=0, sticky='w', pady=5)
-        self.mount_options_var = tk.StringVar(value="-o uid=1000,gid=1000")
-        ttk.Entry(mount_section, textvariable=self.mount_options_var, width=30).grid(row=3, column=1, sticky='ew', padx=(10, 0), pady=5)
+        # Mount point help
+        mount_help = ttk.Label(mount_section, text="Auto-generated based on tape label/type (appears in /media/ like USB drives)", 
+                              font=('Arial', 8), foreground='#666666')
+        mount_help.grid(row=4, column=0, columnspan=3, sticky='w', pady=(0, 5))
+        
+        # Auto-open option
+        self.auto_open_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(mount_section, text="Automatically open in file manager after mounting", 
+                       variable=self.auto_open_var).grid(row=5, column=0, columnspan=3, sticky='w', pady=5)
+        
+        # Mount options (advanced)
+        ttk.Label(mount_section, text="Advanced Options:").grid(row=6, column=0, sticky='w', pady=5)
+        self.mount_options_var = tk.StringVar(value="")
+        ttk.Entry(mount_section, textvariable=self.mount_options_var, width=30).grid(row=6, column=1, sticky='ew', padx=(10, 0), pady=5)
         
         # Mount button
-        ttk.Button(mount_section, text="Mount Tape", command=self.mount_tape).grid(row=4, column=1, pady=10)
+        mount_button = ttk.Button(mount_section, text="🗄️ Mount Tape", command=self.mount_tape)
+        mount_button.grid(row=7, column=1, pady=15)
         
         mount_section.columnconfigure(1, weight=1)
         
@@ -610,18 +1509,55 @@ class LTFSGui:
         self.tape_label_var = tk.StringVar()
         ttk.Entry(format_section, textvariable=self.tape_label_var, width=30).grid(row=1, column=1, sticky='ew', padx=(10, 0), pady=10)
         
+        # MAM Barcode field
+        ttk.Label(format_section, text="MAM Barcode:").grid(row=2, column=0, sticky='w', pady=10)
+        self.mam_barcode_var = tk.StringVar()
+        barcode_entry = ttk.Entry(format_section, textvariable=self.mam_barcode_var, width=30)
+        barcode_entry.grid(row=2, column=1, sticky='ew', padx=(10, 0), pady=10)
+        
+        # Barcode help text
+        barcode_help = ttk.Label(format_section, text="Optional: Set MAM barcode attribute (e.g., LTO123456)", 
+                                font=('Arial', 9), foreground='#666666')
+        barcode_help.grid(row=3, column=0, columnspan=2, sticky='w', pady=(0, 10))
+        
         # Force format option
         self.force_format_var = tk.BooleanVar()
         ttk.Checkbutton(format_section, text="Force format (overwrite existing data)", 
-                       variable=self.force_format_var).grid(row=2, column=0, columnspan=2, sticky='w', pady=10)
+                       variable=self.force_format_var).grid(row=4, column=0, columnspan=2, sticky='w', pady=10)
+        
+        # Advanced options section
+        advanced_frame = ttk.LabelFrame(format_section, text="Advanced Options", padding=10)
+        advanced_frame.grid(row=5, column=0, columnspan=2, sticky='ew', pady=10)
+        
+        # Block size option
+        block_frame = ttk.Frame(advanced_frame)
+        block_frame.pack(fill='x', pady=5)
+        
+        ttk.Label(block_frame, text="Block Size:").pack(side='left')
+        self.block_size_var = tk.StringVar(value="auto")
+        block_combo = ttk.Combobox(block_frame, textvariable=self.block_size_var, 
+                                  values=["auto", "32768", "65536", "131072", "262144", "524288"],
+                                  width=15, state="readonly")
+        block_combo.pack(side='left', padx=(10, 0))
+        
+        ttk.Label(block_frame, text="(auto = optimal for drive type)", 
+                 font=('Arial', 9), foreground='#666666').pack(side='left', padx=(10, 0))
+        
+        # Compression option
+        compression_frame = ttk.Frame(advanced_frame)
+        compression_frame.pack(fill='x', pady=5)
+        
+        self.format_compression_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(compression_frame, text="Enable compression during format", 
+                       variable=self.format_compression_var).pack(side='left')
         
         # Warning
         warning_label = ttk.Label(format_section, text="⚠️  WARNING: Formatting will erase all data on the tape!", 
                                  foreground='red', font=('Arial', 10, 'bold'))
-        warning_label.grid(row=3, column=0, columnspan=2, pady=10)
+        warning_label.grid(row=6, column=0, columnspan=2, pady=20)
         
         # Format button
-        ttk.Button(format_section, text="Format Tape", command=self.format_tape).grid(row=4, column=1, pady=20)
+        ttk.Button(format_section, text="Format Tape", command=self.format_tape).grid(row=7, column=1, pady=20)
         
         format_section.columnconfigure(1, weight=1)
     
@@ -1590,33 +2526,87 @@ class LTFSGui:
         """Refresh the list of available drives"""
         drives = self.ltfs_manager.refresh_drives()
         
-        # Update drives listbox
+        # Get physical drives display list
+        physical_drives = self.ltfs_manager.get_physical_drives_display_list()
+        
+        # Update drives listbox with enhanced display information
         self.drives_listbox.delete(0, tk.END)
-        for drive in drives:
-            self.drives_listbox.insert(tk.END, drive)
+        
+        if physical_drives:
+            for drive_info in physical_drives:
+                display_name = drive_info['display_name']
+                interfaces = drive_info['interfaces_summary']
+                
+                # Create a comprehensive display entry
+                listbox_entry = f"{display_name}\n    {interfaces}"
+                self.drives_listbox.insert(tk.END, listbox_entry)
+                
+                # Store mapping for later use
+                if not hasattr(self, 'drive_mapping'):
+                    self.drive_mapping = {}
+                self.drive_mapping[listbox_entry] = drive_info
+        else:
+            # Fallback to simple device listing if no enhanced info available
+            for drive in drives:
+                display_info = self.ltfs_manager.get_drive_display_info(drive)
+                display_name = display_info['display_name']
+                self.drives_listbox.insert(tk.END, f"{display_name} ({drive})")
+        
+        # Create device lists for dropdowns (use primary devices for operations)
+        device_list = []
+        display_device_list = []
+        
+        if physical_drives:
+            for drive_info in physical_drives:
+                primary_device = drive_info['primary_device']
+                display_name = drive_info['display_name']
+                device_list.append(primary_device)
+                display_device_list.append(f"{display_name} ({primary_device})")
+        else:
+            # Fallback to simple device list
+            for drive in drives:
+                display_info = self.ltfs_manager.get_drive_display_info(drive)
+                device_list.append(drive)
+                display_device_list.append(f"{display_info['display_name']} ({drive})")
         
         # Update mount tab based on single drive mode
         self.update_mount_tab_mode()
         
-        # Update format combo box (always show all drives)
-        self.format_device_combo['values'] = drives
+        # Update combo boxes with enhanced display names
+        self.format_device_combo['values'] = display_device_list
+        self.compression_device_combo['values'] = display_device_list
+        self.diagnostics_device_combo['values'] = display_device_list
+        self.mam_device_combo['values'] = display_device_list
         
-        # Update compression combo box
-        self.compression_device_combo['values'] = drives
+        # Store device mapping for combo boxes
+        self.device_combo_mapping = dict(zip(display_device_list, device_list))
         
-        # Update diagnostics combo box
-        self.diagnostics_device_combo['values'] = drives
+        if display_device_list:
+            self.format_device_var.set(display_device_list[0])
+            self.compression_device_var.set(display_device_list[0])
+            self.diagnostics_device_var.set(display_device_list[0])
+            self.mam_device_var.set(display_device_list[0])
         
-        # Update MAM combo box
-        self.mam_device_combo['values'] = drives
-        
-        if drives:
-            self.format_device_var.set(drives[0])
-            self.compression_device_var.set(drives[0])
-            self.diagnostics_device_var.set(drives[0])
-            self.mam_device_var.set(drives[0])
-        
-        self.log_message(f"Found {len(drives)} tape drives: {', '.join(drives)}")
+        # Log discovered drives with enhanced information
+        if physical_drives:
+            self.log_message(f"Found {len(physical_drives)} physical tape drives:")
+            for drive_info in physical_drives:
+                vendor = drive_info['vendor']
+                model = drive_info['model']
+                lto_gen = drive_info['lto_generation']
+                serial = drive_info['serial_number']
+                interfaces = len(drive_info['interface_devices'])
+                
+                log_msg = f"  • {vendor} {model}"
+                if lto_gen != 'Unknown':
+                    log_msg += f" ({lto_gen})"
+                if serial != 'Unknown':
+                    log_msg += f" [S/N: {serial}]"
+                log_msg += f" - {interfaces} interface(s)"
+                
+                self.log_message(log_msg)
+        else:
+            self.log_message(f"Found {len(drives)} tape drive interface(s): {', '.join(drives)}")
         
         # Check for permission issues
         if hasattr(self.ltfs_manager, 'permission_issues') and self.ltfs_manager.permission_issues:
@@ -1624,29 +2614,45 @@ class LTFSGui:
             self.show_permission_warning()
         
         if self.ltfs_manager.single_drive_mode:
-            self.log_message("Single drive detected - switching to mode selection interface")
+            self.log_message("Single drive detected - interface selection available")
     
     def update_mount_tab_mode(self):
-        """Update mount tab interface - use simple device selection with /dev/st0 as default"""
+        """Update mount tab interface - use enhanced device selection"""
         # Always use simple device selection - no complex mode interface
         self.device_label.config(text="Device:")
         self.mode_frame.grid_remove()
         self.mount_device_combo.grid()
         
-        # Update device combo box with only working devices
-        drives = self.ltfs_manager.tape_drives
-        self.mount_device_combo['values'] = drives
-        
-        # Set /dev/st0 as default if available, otherwise use first available
-        if '/dev/st0' in drives:
-            self.mount_device_var.set('/dev/st0')
-        elif drives:
-            self.mount_device_var.set(drives[0])
+        # Use enhanced display device list if available
+        if hasattr(self, 'device_combo_mapping') and self.device_combo_mapping:
+            display_devices = list(self.device_combo_mapping.keys())
+            self.mount_device_combo['values'] = display_devices
+            
+            # Set first available device as default
+            if display_devices:
+                self.mount_device_var.set(display_devices[0])
+        else:
+            # Fallback to simple device list
+            drives = self.ltfs_manager.tape_drives
+            self.mount_device_combo['values'] = drives
+            
+            # Set /dev/st0 as default if available, otherwise use first available
+            if '/dev/st0' in drives:
+                self.mount_device_var.set('/dev/st0')
+            elif drives:
+                self.mount_device_var.set(drives[0])
         
         # Log the default selection and auto-generate mount point
-        default_device = self.mount_device_var.get()
-        if default_device:
-            self.log_message(f"Default mount device set to: {default_device}")
+        default_selection = self.mount_device_var.get()
+        if default_selection:
+            # Get actual device path
+            if hasattr(self, 'device_combo_mapping') and default_selection in self.device_combo_mapping:
+                default_device = self.device_combo_mapping[default_selection]
+                self.log_message(f"Default mount device set to: {default_selection}")
+            else:
+                default_device = default_selection
+                self.log_message(f"Default mount device set to: {default_device}")
+            
             # Auto-generate mount point if not already set
             if not self.mount_point_var.get().strip():
                 mount_point = self.generate_mount_point(default_device)
@@ -1676,20 +2682,37 @@ class LTFSGui:
         if mode_options:
             self.density_mode_var.set(mode_options[0])
     
-    def get_selected_device(self):
-        """Get the currently selected device - always use simple device selection"""
-        # Always use simple device selection - no complex mode logic
-        selected_device = self.mount_device_var.get()
+    def get_selected_device(self, use_sg_device=False):
+        """Get the currently selected device - handle enhanced device selection"""
+        selected_display = self.mount_device_var.get()
         
-        # Debug logging
-        if selected_device:
-            print(f"DEBUG: Selected device: {selected_device}")
+        # Convert display name to actual device path
+        if hasattr(self, 'device_combo_mapping') and selected_display in self.device_combo_mapping:
+            drive_info = self.device_combo_mapping[selected_display]
+            if use_sg_device and drive_info.get('sg_device'):
+                selected_device = drive_info['sg_device']
+            else:
+                selected_device = drive_info['primary_device']
+            print(f"DEBUG: Selected device: {selected_display} -> {selected_device}")
         else:
+            # Fallback to direct device path
+            selected_device = selected_display
+            print(f"DEBUG: Selected device (direct): {selected_device}")
+        
+        if not selected_device:
             print(f"DEBUG: No device selected, available devices: {self.ltfs_manager.tape_drives}")
             # Auto-select first available device if none selected
             if self.ltfs_manager.tape_drives:
                 selected_device = self.ltfs_manager.tape_drives[0]
-                self.mount_device_var.set(selected_device)
+                # Update display accordingly
+                if hasattr(self, 'device_combo_mapping'):
+                    # Find display name for this device
+                    for display_name, device_path in self.device_combo_mapping.items():
+                        if device_path == selected_device:
+                            self.mount_device_var.set(display_name)
+                            break
+                else:
+                    self.mount_device_var.set(selected_device)
                 print(f"DEBUG: Auto-selected device: {selected_device}")
         
         return selected_device
@@ -1701,13 +2724,55 @@ class LTFSGui:
             messagebox.showwarning("Warning", "Please select a drive first.")
             return
         
-        drive = self.drives_listbox.get(selection[0])
-        info = self.ltfs_manager.get_tape_info(drive)
+        selected_text = self.drives_listbox.get(selection[0])
+        
+        # Get drive info from mapping or extract device path
+        if hasattr(self, 'drive_mapping') and selected_text in self.drive_mapping:
+            drive_info = self.drive_mapping[selected_text]
+            primary_device = drive_info['primary_device']
+            
+            # Get tape status
+            tape_info = self.ltfs_manager.get_tape_info(primary_device)
+            
+            # Create comprehensive info display
+            info_text = f"Physical Drive Information:\n"
+            info_text += f"{'='*50}\n"
+            info_text += f"Drive Model: {drive_info['vendor']} {drive_info['model']}\n"
+            
+            hw_info = drive_info['hardware_info']
+            if drive_info['lto_generation'] != 'Unknown':
+                info_text += f"LTO Generation: {drive_info['lto_generation']}\n"
+            if drive_info['serial_number'] != 'Unknown':
+                info_text += f"Serial Number: {drive_info['serial_number']}\n"
+            if hw_info.get('firmware_version', 'Unknown') != 'Unknown':
+                info_text += f"Firmware Version: {hw_info['firmware_version']}\n"
+            
+            info_text += f"\nInterface Devices:\n"
+            for device in drive_info['interface_devices']:
+                info_text += f"  • {device}\n"
+            
+            info_text += f"\nPrimary Device: {primary_device}\n"
+            info_text += f"\nTape Status (from {primary_device}):\n"
+            info_text += f"{'-'*30}\n"
+            info_text += tape_info
+            
+        else:
+            # Fallback: extract device path from display text
+            if '(' in selected_text and ')' in selected_text:
+                # Extract device path from parentheses
+                device_start = selected_text.rfind('(') + 1
+                device_end = selected_text.rfind(')')
+                device = selected_text[device_start:device_end]
+            else:
+                device = selected_text
+            
+            tape_info = self.ltfs_manager.get_tape_info(device)
+            info_text = f"Drive: {selected_text}\n\n{tape_info}"
         
         self.drive_info_text.delete(1.0, tk.END)
-        self.drive_info_text.insert(1.0, f"Drive: {drive}\n\n{info}")
+        self.drive_info_text.insert(1.0, info_text)
         
-        self.log_message(f"Retrieved info for drive {drive}")
+        self.log_message(f"Retrieved info for selected drive")
     
     def eject_selected_drive(self):
         """Eject tape from the selected drive"""
@@ -1716,23 +2781,39 @@ class LTFSGui:
             messagebox.showwarning("Warning", "Please select a drive first.")
             return
         
-        drive = self.drives_listbox.get(selection[0])
+        selected_text = self.drives_listbox.get(selection[0])
         
-        if messagebox.askyesno("Confirm Eject", f"Eject tape from {drive}?"):
+        # Get primary device from mapping or extract from text
+        if hasattr(self, 'drive_mapping') and selected_text in self.drive_mapping:
+            drive_info = self.drive_mapping[selected_text]
+            device = drive_info['primary_device']
+            display_name = drive_info['display_name']
+        else:
+            # Fallback: extract device path from display text
+            if '(' in selected_text and ')' in selected_text:
+                device_start = selected_text.rfind('(') + 1
+                device_end = selected_text.rfind(')')
+                device = selected_text[device_start:device_end]
+                display_name = selected_text[:device_start-1].strip()
+            else:
+                device = selected_text
+                display_name = selected_text
+        
+        if messagebox.askyesno("Confirm Eject", f"Eject tape from {display_name}\n({device})?"):
             def eject_thread():
-                self.log_message(f"Ejecting tape from {drive}")
-                success, stdout, stderr = self.ltfs_manager.run_command(f"mt -f {drive} eject")
+                self.log_message(f"Ejecting tape from {display_name} ({device})")
+                success, stdout, stderr = self.ltfs_manager.run_command(f"mt -f {device} eject")
                 
                 if not success:
                     # Try offline command if eject fails
-                    success, stdout, stderr = self.ltfs_manager.run_command(f"mt -f {drive} offline")
+                    success, stdout, stderr = self.ltfs_manager.run_command(f"mt -f {device} offline")
                 
                 if success:
-                    self.log_message(f"Tape ejected successfully from {drive}")
-                    messagebox.showinfo("Success", f"Tape ejected from {drive}")
+                    self.log_message(f"Tape ejected successfully from {display_name}")
+                    messagebox.showinfo("Success", f"Tape ejected from {display_name}")
                 else:
                     error_msg = stderr if stderr else "Unknown error occurred"
-                    self.log_message(f"Failed to eject from {drive}: {error_msg}")
+                    self.log_message(f"Failed to eject from {display_name}: {error_msg}")
                     messagebox.showerror("Error", f"Failed to eject tape:\n{error_msg}")
             
             threading.Thread(target=eject_thread, daemon=True).start()
@@ -1744,18 +2825,34 @@ class LTFSGui:
             messagebox.showwarning("Warning", "Please select a drive first.")
             return
         
-        drive = self.drives_listbox.get(selection[0])
+        selected_text = self.drives_listbox.get(selection[0])
+        
+        # Get primary device from mapping or extract from text
+        if hasattr(self, 'drive_mapping') and selected_text in self.drive_mapping:
+            drive_info = self.drive_mapping[selected_text]
+            device = drive_info['primary_device']
+            display_name = drive_info['display_name']
+        else:
+            # Fallback: extract device path from display text
+            if '(' in selected_text and ')' in selected_text:
+                device_start = selected_text.rfind('(') + 1
+                device_end = selected_text.rfind(')')
+                device = selected_text[device_start:device_end]
+                display_name = selected_text[:device_start-1].strip()
+            else:
+                device = selected_text
+                display_name = selected_text
         
         def rewind_thread():
-            self.log_message(f"Rewinding tape in {drive}")
-            success, stdout, stderr = self.ltfs_manager.run_command(f"mt -f {drive} rewind")
+            self.log_message(f"Rewinding tape in {display_name} ({device})")
+            success, stdout, stderr = self.ltfs_manager.run_command(f"mt -f {device} rewind")
             
             if success:
-                self.log_message(f"Tape rewound successfully in {drive}")
-                messagebox.showinfo("Success", f"Tape rewound in {drive}")
+                self.log_message(f"Tape rewound successfully in {display_name}")
+                messagebox.showinfo("Success", f"Tape rewound in {display_name}")
             else:
                 error_msg = stderr if stderr else "Unknown error occurred"
-                self.log_message(f"Failed to rewind {drive}: {error_msg}")
+                self.log_message(f"Failed to rewind {display_name}: {error_msg}")
                 messagebox.showerror("Error", f"Failed to rewind tape:\n{error_msg}")
         
         threading.Thread(target=rewind_thread, daemon=True).start()
@@ -1767,46 +2864,71 @@ class LTFSGui:
             self.mount_point_var.set(directory)
     
     def mount_tape(self):
-        """Mount a tape"""
-        device = self.get_selected_device()
+        """Mount a tape like removable media"""
+        device = self.get_selected_device(use_sg_device=True)
         mount_point = self.mount_point_var.get().strip()
         options = self.mount_options_var.get()
+        auto_open = self.auto_open_var.get()
         
         if not device:
             messagebox.showerror("Error", "Please specify a device.")
             return
         
-        # Auto-generate mount point if not specified
+        # Auto-generate user-friendly mount point if not specified
         if not mount_point:
             mount_point = self.generate_mount_point(device)
             self.mount_point_var.set(mount_point)
         
         def mount_thread():
-            self.log_message(f"Mounting {device} to {mount_point}...")
-            success, stdout, stderr = self.ltfs_manager.mount_tape(device, mount_point, options)
+            mount_name = os.path.basename(mount_point)
+            self.log_message(f"Mounting {device} as '{mount_name}'...")
+            
+            success, stdout, stderr = self.ltfs_manager.mount_tape(device, mount_point, options, auto_open)
             
             if success:
-                self.log_message(f"Successfully mounted {device} to {mount_point}")
-                messagebox.showinfo("Success", f"Tape mounted successfully at {mount_point}")
+                self.log_message(f"Successfully mounted {device} as '{mount_name}' at {mount_point}")
+                if mount_point.startswith('/media/'):
+                    messagebox.showinfo("Tape Mounted", 
+                                       f"'{mount_name}' is now available in your file manager\n\n"
+                                       f"Location: {mount_point}\n\n"
+                                       f"The tape appears like a USB drive or CD and will automatically " 
+                                       f"open in your file manager.")
+                else:
+                    messagebox.showinfo("Tape Mounted", f"Tape mounted successfully at {mount_point}")
                 self.root.after(0, self.refresh_mounted_list)
             else:
                 error_msg = stderr if stderr else "Unknown error occurred"
                 self.log_message(f"Failed to mount {device}: {error_msg}")
-                messagebox.showerror("Error", f"Failed to mount tape:\n{error_msg}")
+                
+                # Provide helpful error messages
+                if "medium consistency check failed" in error_msg.lower():
+                    messagebox.showerror("Mount Failed - Tape Issue", 
+                                       f"Cannot mount tape - the tape may be corrupted or needs repair.\n\n"
+                                       f"Try running 'ltfsck' to check and repair the tape, or format " 
+                                       f"the tape if it's blank.\n\n"
+                                       f"Error: {error_msg}")
+                else:
+                    messagebox.showerror("Mount Failed", f"Failed to mount tape:\n\n{error_msg}")
         
         threading.Thread(target=mount_thread, daemon=True).start()
     
     def on_device_selected(self, event=None):
         """Auto-populate mount point when device is selected"""
-        device = self.mount_device_var.get()
-        if device and not self.mount_point_var.get().strip():
-            # Auto-generate mount point if none is set
+        device_display = self.mount_device_var.get()
+        if device_display and not self.mount_point_var.get().strip():
+            # Get actual device path
+            if hasattr(self, 'device_combo_mapping') and device_display in self.device_combo_mapping:
+                device = self.device_combo_mapping[device_display]
+            else:
+                device = device_display
+            
+            # Auto-generate descriptive mount point
             mount_point = self.generate_mount_point(device)
             self.mount_point_var.set(mount_point)
             self.log_message(f"Auto-generated mount point: {mount_point}")
     
     def generate_mount_point(self, device):
-        """Generate a standard mount point - wrapper for LTFSManager method"""
+        """Generate a user-friendly mount point - wrapper for LTFSManager method"""
         return self.ltfs_manager.generate_mount_point(device)
     
     def refresh_mounted_list(self):
@@ -1870,31 +2992,64 @@ class LTFSGui:
         """Format a tape with LTFS"""
         device = self.format_device_var.get()
         label = self.tape_label_var.get()
+        barcode = self.mam_barcode_var.get().strip()
         force = self.force_format_var.get()
+        block_size = self.block_size_var.get()
+        compression = self.format_compression_var.get()
         
-        if not device:
+        # Convert display name to actual device path if needed
+        if hasattr(self, 'device_combo_mapping') and device in self.device_combo_mapping:
+            actual_device = self.device_combo_mapping[device]
+        else:
+            actual_device = device
+        
+        if not actual_device:
             messagebox.showerror("Error", "Please select a device to format.")
             return
+        
+        # Validate barcode if provided
+        if barcode:
+            if not re.match(r'^[A-Za-z0-9]{1,32}$', barcode):
+                messagebox.showerror("Error", "Barcode must be alphanumeric and 1-32 characters long.")
+                return
         
         # Confirmation dialog
         msg = f"Are you sure you want to format {device}?"
         if label:
             msg += f"\nTape will be labeled: {label}"
+        if barcode:
+            msg += f"\nMAM Barcode will be set to: {barcode}"
+        if block_size != "auto":
+            msg += f"\nBlock size: {block_size} bytes"
+        msg += f"\nCompression: {'Enabled' if compression else 'Disabled'}"
         msg += "\n\n⚠️  This will PERMANENTLY erase all data on the tape!"
         
         if not messagebox.askyesno("Confirm Format", msg):
             return
         
         def format_thread():
-            self.log_message(f"Formatting {device} with LTFS...")
-            success, stdout, stderr = self.ltfs_manager.format_tape(device, label, force)
+            self.log_message(f"Formatting {actual_device} with LTFS...")
+            if label:
+                self.log_message(f"Label: {label}")
+            if barcode:
+                self.log_message(f"MAM Barcode: {barcode}")
+            if block_size != "auto":
+                self.log_message(f"Block size: {block_size} bytes")
+            self.log_message(f"Compression: {'Enabled' if compression else 'Disabled'}")
+            
+            success, stdout, stderr = self.ltfs_manager.format_tape(
+                actual_device, label, barcode, force, block_size, compression
+            )
             
             if success:
-                self.log_message(f"Successfully formatted {device}")
-                messagebox.showinfo("Success", f"Tape formatted successfully with LTFS")
+                success_msg = f"Successfully formatted {actual_device}"
+                if barcode:
+                    success_msg += f" with MAM barcode: {barcode}"
+                self.log_message(success_msg)
+                messagebox.showinfo("Success", "Tape formatted successfully with LTFS")
             else:
                 error_msg = stderr if stderr else "Unknown error occurred"
-                self.log_message(f"Failed to format {device}: {error_msg}")
+                self.log_message(f"Failed to format {actual_device}: {error_msg}")
                 messagebox.showerror("Error", f"Failed to format tape:\n{error_msg}")
         
         threading.Thread(target=format_thread, daemon=True).start()
