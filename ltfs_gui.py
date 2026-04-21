@@ -3965,13 +3965,13 @@ class LTFSGui:
     def setup_theme_control_tab(self):
         """Set up the comprehensive theme control tab"""
         # Main theme control section
-        theme_section = ttk.LabelFrame(self.theme_control_frame, text="Theme Management", padding=20)
+        theme_section = ttk.LabelFrame(self.theme_control_frame, text="Theme Settings", padding=20)
         theme_section.pack(fill='both', expand=True, padx=20, pady=20)
         
         # Introduction text
         intro_text = (
-            "Customize the appearance of the LTFS GUI with various theme options. "
-            "Themes control colors, contrast, and visual style across all interface elements."
+            "Customize the LTFS GUI appearance. "
+            "Themes control colors, contrast, and style across the entire interface."
         )
         intro_label = ttk.Label(theme_section, text=intro_text, wraplength=700, justify='left')
         intro_label.pack(anchor='w', pady=(0, 20))
@@ -3983,7 +3983,7 @@ class LTFSGui:
         current_info_frame = ttk.Frame(current_frame)
         current_info_frame.pack(fill='x')
         
-        ttk.Label(current_info_frame, text="Active Theme:").pack(side='left', padx=(0, 10))
+        ttk.Label(current_info_frame, text="Current Theme:").pack(side='left', padx=(0, 10))
         self.current_theme_display = ttk.Label(current_info_frame, text="", font=('Arial', 10, 'bold'))
         self.current_theme_display.pack(side='left')
         
@@ -3997,19 +3997,19 @@ class LTFSGui:
         
         # Theme options frame
         options_frame = ttk.Frame(theme_notebook)
-        theme_notebook.add(options_frame, text="Theme Selection")
+        theme_notebook.add(options_frame, text="Select Theme")
         
         # Theme preview frame
         preview_frame = ttk.Frame(theme_notebook)
-        theme_notebook.add(preview_frame, text="Theme Preview")
+        theme_notebook.add(preview_frame, text="Preview")
         
         # Advanced settings frame
         advanced_frame = ttk.Frame(theme_notebook)
-        theme_notebook.add(advanced_frame, text="Advanced")
+        theme_notebook.add(advanced_frame, text="Advanced Settings")
         
         # Color picker frame
         color_picker_frame = ttk.Frame(theme_notebook)
-        theme_notebook.add(color_picker_frame, text="Color Editor")
+        theme_notebook.add(color_picker_frame, text="Custom Colors")
         
         # Set up theme selection
         self.setup_theme_selection(options_frame)
@@ -4067,28 +4067,28 @@ class LTFSGui:
         self.theme_details = {
             'light': {
                 'title': 'Light (Linux Mint)',
-                'description': 'Clean, bright theme based on Linux Mint\'s light theme. Ideal for well-lit environments.',
-                'best_for': 'General use, office environments, accessibility'
+                'description': 'Clean, bright theme based on Linux Mint\'s light palette.',
+                'best_for': 'General use, bright spaces, accessibility'
             },
             'dark': {
                 'title': 'Dark (Linux Mint)',
-                'description': 'True dark theme using exact Linux Mint dark colors. Reduces eye strain in low-light conditions.',
-                'best_for': 'Low-light environments, extended use, battery saving'
+                'description': 'Dark theme using Linux Mint dark colors to reduce glare and eye strain.',
+                'best_for': 'Low-light use, long sessions, reduced glare'
             },
             'blue_dark': {
                 'title': 'Blue Dark',
-                'description': 'Dark theme with blue accents. Modern look with excellent contrast.',
-                'best_for': 'Professional environments, coding, technical work'
+                'description': 'Dark theme with blue accents and strong contrast.',
+                'best_for': 'Technical work, coding, high readability'
             },
             'high_contrast': {
                 'title': 'High Contrast',
-                'description': 'Maximum contrast theme for accessibility. Pure black and white with bright accents.',
-                'best_for': 'Visual impairments, accessibility requirements'
+                'description': 'Maximum-contrast theme for accessibility needs.',
+                'best_for': 'Visual accessibility and clarity'
             },
             'system': {
                 'title': 'System Default',
-                'description': 'Automatically matches your system theme settings. Updates when system theme changes.',
-                'best_for': 'Consistent system appearance, automatic adaptation'
+                'description': 'Follows your system theme settings when detected.',
+                'best_for': 'Keeping app and desktop appearance aligned'
             }
         }
         
@@ -4120,26 +4120,26 @@ class LTFSGui:
         right_col = ttk.Frame(categories_frame)
         right_col.pack(side='right', fill='y', padx=(10, 0))
         
-        ttk.Label(right_col, text="Theme Actions:", font=('Arial', 12, 'bold')).pack(anchor='w', pady=(0, 10))
+        ttk.Label(right_col, text="Actions:", font=('Arial', 12, 'bold')).pack(anchor='w', pady=(0, 10))
         
         # Action buttons
-        ttk.Button(right_col, text="Apply Selected Theme", 
+        ttk.Button(right_col, text="Apply Theme", 
                   command=self.apply_selected_theme_from_tab).pack(fill='x', pady=2)
-        ttk.Button(right_col, text="Preview Theme", 
+        ttk.Button(right_col, text="Preview Selected Theme", 
                   command=self.preview_selected_theme).pack(fill='x', pady=2)
-        ttk.Button(right_col, text="Auto-Detect System", 
+        ttk.Button(right_col, text="Use System Theme", 
                   command=self.auto_detect_theme).pack(fill='x', pady=2)
-        ttk.Button(right_col, text="Reset to Default", 
+        ttk.Button(right_col, text="Reset Theme", 
                   command=self.reset_to_default_theme).pack(fill='x', pady=2)
         
         # Separator
         ttk.Separator(right_col, orient='horizontal').pack(fill='x', pady=10)
         
         # Theme management
-        ttk.Label(right_col, text="Theme Management:", font=('Arial', 10, 'bold')).pack(anchor='w', pady=(0, 5))
-        ttk.Button(right_col, text="Export Theme Settings", 
+        ttk.Label(right_col, text="Import / Export:", font=('Arial', 10, 'bold')).pack(anchor='w', pady=(0, 5))
+        ttk.Button(right_col, text="Export Theme", 
                   command=self.export_theme_settings).pack(fill='x', pady=2)
-        ttk.Button(right_col, text="Import Theme Settings", 
+        ttk.Button(right_col, text="Import Theme", 
                   command=self.import_theme_settings).pack(fill='x', pady=2)
     
     def setup_theme_preview(self, parent):
@@ -4230,28 +4230,28 @@ class LTFSGui:
         ttk.Label(advanced_main, text="Advanced Theme Settings", font=('Arial', 14, 'bold')).pack(anchor='w', pady=(0, 15))
         
         # Theme persistence settings
-        persistence_frame = ttk.LabelFrame(advanced_main, text="Theme Persistence", padding=10)
+        persistence_frame = ttk.LabelFrame(advanced_main, text="Saving & Startup", padding=10)
         persistence_frame.pack(fill='x', pady=(0, 10))
         
         self.auto_save_theme_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(persistence_frame, text="Auto-save theme changes", 
+        ttk.Checkbutton(persistence_frame, text="Automatically save theme changes", 
                        variable=self.auto_save_theme_var).pack(anchor='w')
         
         self.auto_detect_startup_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(persistence_frame, text="Auto-detect system theme on startup", 
+        ttk.Checkbutton(persistence_frame, text="Detect system theme on startup", 
                        variable=self.auto_detect_startup_var).pack(anchor='w')
         
         # System integration
         integration_frame = ttk.LabelFrame(advanced_main, text="System Integration", padding=10)
         integration_frame.pack(fill='x', pady=(0, 10))
         
-        ttk.Button(integration_frame, text="Apply Theme to System GTK", 
+        ttk.Button(integration_frame, text="Apply Theme to System (GTK)", 
                   command=self.apply_theme_to_system).pack(anchor='w', pady=2)
         ttk.Button(integration_frame, text="Detect Current System Theme", 
                   command=self.detect_and_show_system_theme).pack(anchor='w', pady=2)
         
         # Theme information
-        info_frame = ttk.LabelFrame(advanced_main, text="Theme Information", padding=10)
+        info_frame = ttk.LabelFrame(advanced_main, text="Theme Details", padding=10)
         info_frame.pack(fill='both', expand=True, pady=(0, 10))
         
         self.theme_info_text = scrolledtext.ScrolledText(info_frame, height=10, wrap='word')
@@ -4264,9 +4264,9 @@ class LTFSGui:
         actions_frame = ttk.Frame(advanced_main)
         actions_frame.pack(fill='x')
         
-        ttk.Button(actions_frame, text="Refresh Theme Info", 
+        ttk.Button(actions_frame, text="Refresh Details", 
                   command=self.update_theme_info).pack(side='left', padx=(0, 10))
-        ttk.Button(actions_frame, text="Clear Theme Config", 
+        ttk.Button(actions_frame, text="Clear Saved Theme", 
                   command=self.clear_theme_config).pack(side='left')
     
     def update_current_theme_display(self):
@@ -4358,7 +4358,7 @@ class LTFSGui:
         
         if messagebox.askyesno("Preview Theme", 
                              f"Preview theme '{self.themes[selected_theme]['name']}'?\n\n"
-                             "This will temporarily apply the theme. You can revert using 'Reset to Default'."):
+                             "This will temporarily apply the theme. You can revert using 'Reset Theme'."):
             # Store current theme for reverting
             self.previous_theme = self.current_theme_name.get()
             

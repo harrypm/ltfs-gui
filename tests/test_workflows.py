@@ -59,10 +59,12 @@ class TestWorkflowExpectations(unittest.TestCase):
             "cache: pip",
             "pyinstaller",
             "--onefile",
+            "--icon packaging/windows/ltfs-gui.ico",
             "dist/ltfs-gui.exe",
             "actions/upload-artifact@v4",
             "workflow_dispatch",
             "packaging/appimage/requirements.txt",
+            "packaging/windows/ltfs-gui.ico",
         ]:
             self.assertIn(expected, workflow)
         

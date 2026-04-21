@@ -7,6 +7,7 @@ on:
     paths:
       - ltfs_gui.py
       - packaging/appimage/requirements.txt
+      - packaging/windows/ltfs-gui.ico
       - .github/workflows/windows-exe.yml
   pull_request:
     branches:
@@ -14,6 +15,7 @@ on:
     paths:
       - ltfs_gui.py
       - packaging/appimage/requirements.txt
+      - packaging/windows/ltfs-gui.ico
       - .github/workflows/windows-exe.yml
 jobs:
   build-windows-exe:
@@ -45,6 +47,7 @@ jobs:
             --name ltfs-gui `
             --onefile `
             --windowed `
+            --icon packaging/windows/ltfs-gui.ico `
             --distpath dist `
             --workpath build/windows/pyinstaller/build `
             --specpath build/windows/pyinstaller `
