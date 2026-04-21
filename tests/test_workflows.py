@@ -5,6 +5,7 @@ import unittest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = REPO_ROOT / ".github/workflows/ci.yml"
 APPIMAGE_WORKFLOW = REPO_ROOT / ".github/workflows/appimage.yml"
+WINDOWS_EXE_WORKFLOW = REPO_ROOT / ".github/workflows/windows-exe.yml"
 
 
 class TestWorkflowExpectations(unittest.TestCase):
@@ -47,6 +48,26 @@ class TestWorkflowExpectations(unittest.TestCase):
         ]:
             self.assertIn(expected, workflow)
         self.assertNotIn("actions/setup-python", workflow)
+    
+    def test_windows_exe_workflow_exists_and_builds_artifacts(self):
+        self.assertTrue(WINDOWS_EXE_WORKFLOW.exists(), "Missing .github/workflows/windows-exe.yml")
+        workflow = WINDOWS_EXE_WORKFLOW.read_text(encoding="utf-8")
+        
+        for expected in [
+            "windows-latest",
+            "actions/setup-python@v5",
+            "cache: pip",
+            "pyinstaller",
+            "--onefile",
+            "dist/ltfs-gui.exe",
+            "actions/upload-artifact@v4",
+            "workflow_dispatch",
+            "packaging/appimage/requirements.txt",
+        ]:
+            self.assertIn(expected, workflow)
+        
+        self.assertIn("python-version: [\"3.10\", \"3.11\"]", workflow)
+    
     def test_appimage_build_script_uses_pinned_and_vendored_dependencies(self):
         script = (REPO_ROOT / "scripts/build-appimage.sh").read_text(encoding="utf-8")
         app_run = (REPO_ROOT / "packaging/appimage/AppRun").read_text(encoding="utf-8")
