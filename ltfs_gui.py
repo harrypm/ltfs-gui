@@ -19,6 +19,7 @@ import os
 import re
 import time
 import json
+import sys
 from pathlib import Path
 
 class LTFSManager:
@@ -1197,6 +1198,7 @@ class LTFSGui:
         self.root = root
         self.root.title("LTFS Manager")
         self.root.geometry("800x600")
+        self._set_application_icon()
         
         # Theme settings with multiple options - will be initialized after theme definitions
         self.current_theme_name = tk.StringVar()
@@ -1322,6 +1324,28 @@ class LTFSGui:
         # Apply the saved/detected theme
         self.apply_selected_theme()
         self.refresh_drives()
+
+    def _set_application_icon(self):
+        """Set application icon for the main GUI window."""
+        icon_candidates = []
+        script_dir = Path(__file__).resolve().parent
+
+        icon_candidates.append(script_dir / "packaging" / "appimage" / "ltfs-gui.png")
+        icon_candidates.append(script_dir / "ltfs-gui.png")
+        try:
+            icon_candidates.append(Path(sys.executable).resolve().parent / "ltfs-gui.png")
+        except Exception:
+            pass
+
+        for icon_path in icon_candidates:
+            if not icon_path.exists():
+                continue
+            try:
+                self._app_icon_image = tk.PhotoImage(file=str(icon_path))
+                self.root.iconphoto(True, self._app_icon_image)
+                return
+            except Exception:
+                continue
         
     def setup_ui(self):
         """Set up the user interface"""

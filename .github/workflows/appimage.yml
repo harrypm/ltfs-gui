@@ -51,7 +51,7 @@ jobs:
           "${appimage}" --appimage-extract >/dev/null
           test -f squashfs-root/AppRun
           test -f squashfs-root/ltfs-gui.desktop
-          test -f squashfs-root/ltfs-gui.svg
+          test -f squashfs-root/ltfs-gui.png
           test -f squashfs-root/usr/lib/libfuse.so.2
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4

@@ -32,6 +32,7 @@ class TestWorkflowExpectations(unittest.TestCase):
             "--appimage-extract",
             "actions/upload-artifact@v4",
             "dist/*.AppImage",
+            "squashfs-root/ltfs-gui.png",
             "squashfs-root/usr/lib/libfuse.so.2",
         ]:
             self.assertIn(expected, workflow)
@@ -43,6 +44,9 @@ class TestWorkflowExpectations(unittest.TestCase):
         checksums = (REPO_ROOT / "vendor/appimagetool/SHA256SUMS").read_text(encoding="utf-8")
 
         for expected in [
+            "ICON_BASENAME",
+            "packaging/appimage/${ICON_BASENAME}",
+            "ln -sf \"${ICON_BASENAME}\" \"${APPDIR}/.DirIcon\"",
             "APPIMAGETOOL_VERSION",
             "vendor/appimagetool",
             "APPIMAGETOOL_CHECKSUMS",

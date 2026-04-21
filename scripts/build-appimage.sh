@@ -10,6 +10,7 @@ DIST_DIR="${REPO_ROOT}/dist"
 APP_NAME="LTFS-Manager"
 DESKTOP_ID="ltfs-gui"
 BINARY_NAME="ltfs-gui"
+ICON_BASENAME="${DESKTOP_ID}.png"
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 APPIMAGETOOL_BIN="${APPIMAGETOOL_BIN:-}"
@@ -144,11 +145,12 @@ sed \
   -e "s|^Icon=.*|Icon=${DESKTOP_ID}|" \
   "${REPO_ROOT}/ltfs-gui.desktop" > "${APPDIR}/usr/share/applications/${DESKTOP_ID}.desktop"
 
-cp "${REPO_ROOT}/packaging/appimage/${DESKTOP_ID}.svg" \
-  "${APPDIR}/usr/share/icons/hicolor/scalable/apps/${DESKTOP_ID}.svg"
-cp "${REPO_ROOT}/packaging/appimage/${DESKTOP_ID}.svg" "${APPDIR}/${DESKTOP_ID}.svg"
+cp "${REPO_ROOT}/packaging/appimage/${ICON_BASENAME}" \
+  "${APPDIR}/usr/share/icons/hicolor/scalable/apps/${ICON_BASENAME}"
+cp "${REPO_ROOT}/packaging/appimage/${ICON_BASENAME}" "${APPDIR}/${ICON_BASENAME}"
+cp "${REPO_ROOT}/packaging/appimage/${ICON_BASENAME}" "${APPDIR}/usr/bin/${ICON_BASENAME}"
 cp "${APPDIR}/usr/share/applications/${DESKTOP_ID}.desktop" "${APPDIR}/${DESKTOP_ID}.desktop"
-ln -sf "${DESKTOP_ID}.svg" "${APPDIR}/.DirIcon"
+ln -sf "${ICON_BASENAME}" "${APPDIR}/.DirIcon"
 if ! copy_fuse_library "libfuse.so.2"; then
   echo "Required FUSE runtime library not found: libfuse.so.2" >&2
   echo "Install libfuse2 (and libfuse-dev for build environments) before building AppImage." >&2
