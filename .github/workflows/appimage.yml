@@ -1,0 +1,57 @@
+name: AppImage
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - ltfs_gui.py
+      - ltfs-gui.desktop
+      - scripts/build-appimage.sh
+      - packaging/appimage/**
+      - .github/workflows/appimage.yml
+  pull_request:
+    branches:
+      - master
+    paths:
+      - ltfs_gui.py
+      - ltfs-gui.desktop
+      - scripts/build-appimage.sh
+      - packaging/appimage/**
+      - .github/workflows/appimage.yml
+jobs:
+  build-appimage:
+    name: Build AppImage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install AppImage prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3 python3-venv python3-pip python3-tk \
+            libfuse2 desktop-file-utils
+      - name: Build AppImage artifact
+        run: bash scripts/build-appimage.sh
+      - name: Smoke validate AppImage
+        run: |
+          shopt -s nullglob
+          appimages=(dist/*.AppImage)
+          if [ "${#appimages[@]}" -eq 0 ]; then
+            echo "No AppImage output found under dist/"
+            exit 1
+          fi
+          appimage="${appimages[0]}"
+          test -x "${appimage}"
+          "${appimage}" --appimage-version
+          rm -rf squashfs-root
+          "${appimage}" --appimage-extract >/dev/null
+          test -f squashfs-root/AppRun
+          test -f squashfs-root/ltfs-gui.desktop
+          test -f squashfs-root/ltfs-gui.svg
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ltfs-manager-appimage
+          path: dist/*.AppImage

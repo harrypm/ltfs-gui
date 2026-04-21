@@ -1,0 +1,42 @@
+name: CI
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+jobs:
+  gui-static-tests:
+    name: GUI static tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate Python syntax
+        run: python -m py_compile ltfs_gui.py
+      - name: Run static regression tests
+        run: python -m unittest discover -s tests -v
+  ltfs-build:
+    name: LTFS build check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential automake autoconf libtool pkg-config \
+            icu-devtools libicu-dev libxml2-dev uuid-dev \
+            fuse libfuse-dev libsnmp-dev
+      - name: Configure and build LTFS
+        run: |
+          ./autogen.sh
+          ./configure
+          make -j"$(nproc)"
