@@ -1,0 +1,6 @@
+Place optional vendored AppImageKit binaries in this directory to avoid network downloads during packaging:
+- appimagetool-x86_64.AppImage
+- appimagetool-aarch64.AppImage
+
+When present and executable, scripts/build-appimage.sh will prefer these vendored binaries.
+Checksums for pinned release assets are listed in SHA256SUMS.

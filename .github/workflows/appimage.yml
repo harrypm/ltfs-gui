@@ -9,6 +9,7 @@ on:
       - ltfs-gui.desktop
       - scripts/build-appimage.sh
       - packaging/appimage/**
+      - vendor/appimagetool/**
       - .github/workflows/appimage.yml
   pull_request:
     branches:
@@ -18,6 +19,7 @@ on:
       - ltfs-gui.desktop
       - scripts/build-appimage.sh
       - packaging/appimage/**
+      - vendor/appimagetool/**
       - .github/workflows/appimage.yml
 jobs:
   build-appimage:
@@ -50,6 +52,7 @@ jobs:
           test -f squashfs-root/AppRun
           test -f squashfs-root/ltfs-gui.desktop
           test -f squashfs-root/ltfs-gui.svg
+          test -f squashfs-root/usr/lib/libfuse.so.2
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
         with:

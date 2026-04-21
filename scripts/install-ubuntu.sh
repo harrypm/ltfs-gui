@@ -34,7 +34,7 @@ sudo apt install -y build-essential autotools-dev automake libtool pkg-config
 
 # Install core dependencies
 echo "Installing core dependencies..."
-sudo apt install -y libfuse-dev libxml2-dev uuid-dev libicu-dev
+sudo apt install -y libfuse2 libfuse-dev libxml2-dev uuid-dev libicu-dev
 
 # Install ICU development tools
 echo "Installing ICU development tools..."
@@ -46,7 +46,7 @@ sudo apt install -y libpthread-stubs0-dev libsnmp-dev
 
 # Install Python dependencies for GUI
 echo "Installing Python dependencies..."
-sudo apt install -y python3 python3-tk
+sudo apt install -y python3 python3-venv python3-pip python3-tk
 
 echo "✅ All dependencies installed successfully"
 

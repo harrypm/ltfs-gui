@@ -18,6 +18,7 @@ class TestWorkflowExpectations(unittest.TestCase):
             "./autogen.sh",
             "./configure",
             "make -j",
+            "libfuse2 libfuse-dev",
         ]:
             self.assertIn(expected, workflow)
 
@@ -31,9 +32,34 @@ class TestWorkflowExpectations(unittest.TestCase):
             "--appimage-extract",
             "actions/upload-artifact@v4",
             "dist/*.AppImage",
+            "squashfs-root/usr/lib/libfuse.so.2",
         ]:
             self.assertIn(expected, workflow)
         self.assertNotIn("actions/setup-python", workflow)
+    def test_appimage_build_script_uses_pinned_and_vendored_dependencies(self):
+        script = (REPO_ROOT / "scripts/build-appimage.sh").read_text(encoding="utf-8")
+        app_run = (REPO_ROOT / "packaging/appimage/AppRun").read_text(encoding="utf-8")
+        requirements = (REPO_ROOT / "packaging/appimage/requirements.txt").read_text(encoding="utf-8")
+        checksums = (REPO_ROOT / "vendor/appimagetool/SHA256SUMS").read_text(encoding="utf-8")
+
+        for expected in [
+            "APPIMAGETOOL_VERSION",
+            "vendor/appimagetool",
+            "APPIMAGETOOL_CHECKSUMS",
+            "packaging/appimage/requirements.txt",
+            "releases/download/${APPIMAGETOOL_VERSION}",
+            "sha256sum",
+            "libfuse.so.2",
+            "python_has_tk",
+            "/usr/bin/python3",
+        ]:
+            self.assertIn(expected, script)
+
+        self.assertNotIn("releases/download/continuous", script)
+        self.assertIn("LD_LIBRARY_PATH", app_run)
+        self.assertIn("pyinstaller==", requirements)
+        self.assertIn("appimagetool-x86_64.AppImage", checksums)
+        self.assertIn("appimagetool-aarch64.AppImage", checksums)
 
 
 if __name__ == "__main__":
