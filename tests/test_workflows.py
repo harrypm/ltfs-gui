@@ -15,10 +15,16 @@ class TestWorkflowExpectations(unittest.TestCase):
         for expected in [
             "python -m py_compile ltfs_gui.py",
             "python -m unittest discover -s tests -v",
+            "strategy:",
+            "matrix:",
+            "windows-latest",
+            "macos-latest",
             "./autogen.sh",
             "./configure",
             "make -j",
             "libfuse2 libfuse-dev",
+            "actions/cache@v4",
+            "ccache",
         ]:
             self.assertIn(expected, workflow)
 
@@ -29,11 +35,15 @@ class TestWorkflowExpectations(unittest.TestCase):
         for expected in [
             "scripts/build-appimage.sh",
             "python3-tk",
+            "Resolve pip cache directory",
+            "Cache pip downloads",
+            "Cache appimagetool binary",
             "--appimage-extract",
             "actions/upload-artifact@v4",
             "dist/*.AppImage",
             "squashfs-root/ltfs-gui.png",
             "squashfs-root/usr/lib/libfuse.so.2",
+            "APPIMAGETOOL_BIN",
         ]:
             self.assertIn(expected, workflow)
         self.assertNotIn("actions/setup-python", workflow)
@@ -56,6 +66,8 @@ class TestWorkflowExpectations(unittest.TestCase):
             "libfuse.so.2",
             "python_has_tk",
             "/usr/bin/python3",
+            "if [[ -n \"${APPIMAGETOOL_BIN}\" ]] && [[ ! -x \"${APPIMAGETOOL_BIN}\" ]]; then",
+            "dirname \"${APPIMAGETOOL_BIN}\"",
         ]:
             self.assertIn(expected, script)
 

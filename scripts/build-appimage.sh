@@ -166,6 +166,13 @@ case "${RAW_ARCH}" in
   aarch64|arm64) APPIMAGE_ARCH="aarch64" ;;
   *) APPIMAGE_ARCH="${RAW_ARCH}" ;;
 esac
+if [[ -n "${APPIMAGETOOL_BIN}" ]] && [[ ! -x "${APPIMAGETOOL_BIN}" ]]; then
+  mkdir -p "$(dirname "${APPIMAGETOOL_BIN}")"
+  curl -L --fail \
+    "${APPIMAGETOOL_BASE_URL}/appimagetool-${APPIMAGE_ARCH}.AppImage" \
+    -o "${APPIMAGETOOL_BIN}"
+  chmod +x "${APPIMAGETOOL_BIN}"
+fi
 
 if [[ -z "${APPIMAGETOOL_BIN}" ]]; then
   VENDORED_APPIMAGETOOL="${VENDORED_APPIMAGETOOL_DIR}/appimagetool-${APPIMAGE_ARCH}.AppImage"

@@ -34,8 +34,27 @@ jobs:
           sudo apt-get install -y \
             python3 python3-venv python3-pip python3-tk \
             libfuse2 desktop-file-utils
+      - name: Resolve pip cache directory
+        id: pip-cache
+        run: echo "dir=$(python3 -m pip cache dir)" >> "$GITHUB_OUTPUT"
+      - name: Cache pip downloads
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-appimage-pip-${{ hashFiles('packaging/appimage/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-appimage-pip-
+      - name: Cache appimagetool binary
+        uses: actions/cache@v4
+        with:
+          path: .cache/appimagetool
+          key: ${{ runner.os }}-appimagetool-${{ hashFiles('vendor/appimagetool/SHA256SUMS') }}
       - name: Build AppImage artifact
-        run: bash scripts/build-appimage.sh
+        env:
+          APPIMAGETOOL_BIN: ${{ github.workspace }}/.cache/appimagetool/appimagetool-x86_64.AppImage
+        run: |
+          mkdir -p .cache/appimagetool
+          bash scripts/build-appimage.sh
       - name: Smoke validate AppImage
         run: |
           shopt -s nullglob

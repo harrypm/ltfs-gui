@@ -9,34 +9,65 @@ on:
   workflow_dispatch:
 jobs:
   gui-static-tests:
-    name: GUI static tests
-    runs-on: ubuntu-latest
+    name: GUI static tests (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12"]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
+      - name: Resolve pip cache directory
+        id: pip-cache
+        shell: bash
+        run: echo "dir=$(python -m pip cache dir)" >> "$GITHUB_OUTPUT"
+      - name: Cache pip downloads
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-py${{ matrix.python-version }}-pip-${{ hashFiles('packaging/appimage/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-py${{ matrix.python-version }}-pip-
       - name: Validate Python syntax
         run: python -m py_compile ltfs_gui.py
       - name: Run static regression tests
         run: python -m unittest discover -s tests -v
   ltfs-build:
-    name: LTFS build check
-    runs-on: ubuntu-latest
+    name: LTFS build check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-latest]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
       - name: Install build dependencies
         run: |
+          ccache --zero-stats || true
           sudo apt-get update
           sudo apt-get install -y \
             build-essential automake autoconf libtool pkg-config \
             icu-devtools libicu-dev libxml2-dev uuid-dev \
-            libfuse2 libfuse-dev libsnmp-dev
+            libfuse2 libfuse-dev libsnmp-dev ccache
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-${{ matrix.os }}-ltfs-ccache-${{ hashFiles('configure.ac', 'Makefile.am', 'src/**/*.c', 'src/**/*.h') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.os }}-ltfs-ccache-
       - name: Configure and build LTFS
+        env:
+          CC: ccache gcc
         run: |
           ./autogen.sh
           ./configure
           make -j"$(nproc)"
+          ccache --show-stats || true

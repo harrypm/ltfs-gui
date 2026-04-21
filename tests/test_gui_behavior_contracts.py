@@ -44,6 +44,24 @@ class TestGuiBehaviorContracts(unittest.TestCase):
         self.assertIn("self._resolve_device_from_selection(selected_display)", method)
         self.assertIn("drive_hardware_info", method)
         self.assertNotIn("drive_info['primary_device']", method)
+    
+    def test_diagnostics_actions_use_resolved_device_path(self):
+        helper = self._method_source("_get_selected_diagnostics_device")
+        self.assertIn("self.diagnostics_device_var.get()", helper)
+        self.assertIn("self._resolve_device_from_selection(selected_value)", helper)
+        
+        method = self._method_source("check_drive_status")
+        self.assertIn("self._get_selected_diagnostics_device()", method)
+        self.assertNotIn("self.diagnostics_device_var.get()", method)
+    
+    def test_mam_actions_use_resolved_device_path(self):
+        helper = self._method_source("_get_selected_mam_device")
+        self.assertIn("self.mam_device_var.get()", helper)
+        self.assertIn("self._resolve_device_from_selection(selected_value)", helper)
+        
+        method = self._method_source("read_mam_attributes")
+        self.assertIn("self._get_selected_mam_device()", method)
+        self.assertNotIn("self.mam_device_var.get()", method)
 
 
 if __name__ == "__main__":

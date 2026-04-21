@@ -1187,12 +1187,15 @@ Categories=System;
 
 class LTFSGui:
     def refresh_tape_status(self):
+        theme = self.themes.get(self.current_theme_name.get(), self.themes['light'])
+        success_color = theme.get('success_fg', 'green')
+        warning_color = theme.get('warning_fg', 'red')
         device = self.get_selected_device()
         if device and self.ltfs_manager.is_tape_loaded(device):
             barcode = self.ltfs_manager.get_tape_barcode(device)
-            self.tape_status_label.config(text=f'Tape Loaded: {barcode}', foreground='green')
+            self.tape_status_label.config(text=f'Tape Loaded: {barcode}', foreground=success_color)
         else:
-            self.tape_status_label.config(text='No Tape Loaded', foreground='red')
+            self.tape_status_label.config(text='No Tape Loaded', foreground=warning_color)
         self.root.after(5000, self.refresh_tape_status)
     def __init__(self, root):
         self.root = root
@@ -1438,7 +1441,7 @@ class LTFSGui:
         
         # Info label
         info_text = "Tapes will be mounted like removable media (USB drives/CDs) and appear in your file manager."
-        info_label = ttk.Label(mount_section, text=info_text, font=('Arial', 9), foreground='#666666')
+        info_label = ttk.Label(mount_section, text=info_text, font=('Arial', 9), style='Info.TLabel')
         info_label.grid(row=0, column=0, columnspan=3, sticky='w', pady=(0, 10))
         
         # Device/Mode selection (will be updated based on drive count)
@@ -1474,7 +1477,7 @@ class LTFSGui:
         
         # Mount point help
         mount_help = ttk.Label(mount_section, text="Auto-generated based on tape label/type (appears in /media/ like USB drives)", 
-                              font=('Arial', 8), foreground='#666666')
+                              font=('Arial', 8), style='Info.TLabel')
         mount_help.grid(row=4, column=0, columnspan=3, sticky='w', pady=(0, 5))
         
         # Auto-open option
@@ -1542,7 +1545,7 @@ class LTFSGui:
         
         # Barcode help text
         barcode_help = ttk.Label(format_section, text="Optional: Set MAM barcode attribute (e.g., LTO123456)", 
-                                font=('Arial', 9), foreground='#666666')
+                                font=('Arial', 9), style='Info.TLabel')
         barcode_help.grid(row=3, column=0, columnspan=2, sticky='w', pady=(0, 10))
         
         # Force format option
@@ -1566,7 +1569,7 @@ class LTFSGui:
         block_combo.pack(side='left', padx=(10, 0))
         
         ttk.Label(block_frame, text="(auto = optimal for drive type)", 
-                 font=('Arial', 9), foreground='#666666').pack(side='left', padx=(10, 0))
+                 font=('Arial', 9), style='Info.TLabel').pack(side='left', padx=(10, 0))
         
         # Compression option
         compression_frame = ttk.Frame(advanced_frame)
@@ -1578,7 +1581,7 @@ class LTFSGui:
         
         # Warning
         warning_label = ttk.Label(format_section, text="⚠️  WARNING: Formatting will erase all data on the tape!", 
-                                 foreground='red', font=('Arial', 10, 'bold'))
+                                 style='Warning.TLabel', font=('Arial', 10, 'bold'))
         warning_label.grid(row=6, column=0, columnspan=2, pady=20)
         
         # Format button
@@ -1682,12 +1685,12 @@ class LTFSGui:
             desc_frame.pack(fill='x', padx=20, pady=(5, 0))
             
             desc_label = ttk.Label(desc_frame, text=mode_info["description"], 
-                                 wraplength=600, justify='left', foreground='#666666')
+                                 wraplength=600, justify='left', style='Info.TLabel')
             desc_label.pack(anchor='w')
             
             # Effects
             effect_label = ttk.Label(desc_frame, text=mode_info["effect"], 
-                                   font=('Arial', 9), foreground='#006600')
+                                   font=('Arial', 9), style='Success.TLabel')
             effect_label.pack(anchor='w', pady=(5, 10))
         
         # Control buttons
@@ -1704,7 +1707,7 @@ class LTFSGui:
         # Status display
         self.compression_status_var = tk.StringVar(value="Select a drive to view compression settings")
         status_label = ttk.Label(compression_section, textvariable=self.compression_status_var, 
-                               font=('Arial', 10), foreground='#333333')
+                               font=('Arial', 10), style='Status.TLabel')
         status_label.pack(anchor='w', pady=(15, 0))
         
         # Bind drive selection to update available modes
@@ -1735,6 +1738,16 @@ class LTFSGui:
             return match.group(1)
         
         return selected_value
+    
+    def _get_selected_diagnostics_device(self):
+        """Return diagnostics device as an actual /dev path."""
+        selected_value = self.diagnostics_device_var.get()
+        return self._resolve_device_from_selection(selected_value)
+    
+    def _get_selected_mam_device(self):
+        """Return MAM device as an actual /dev path."""
+        selected_value = self.mam_device_var.get()
+        return self._resolve_device_from_selection(selected_value)
     
     @staticmethod
     def _parse_mt_compression_status(status_output):
@@ -1980,7 +1993,7 @@ class LTFSGui:
         # Status display
         self.diagnostics_status_var = tk.StringVar(value="Select a drive to begin diagnostics")
         status_label = ttk.Label(diagnostics_section, textvariable=self.diagnostics_status_var, 
-                               font=('Arial', 10), foreground='#333333')
+                               font=('Arial', 10), style='Status.TLabel')
         status_label.pack(anchor='w', pady=(15, 0))
         
         # Bind drive selection
@@ -1988,13 +2001,13 @@ class LTFSGui:
     
     def on_diagnostics_drive_change(self, event=None):
         """Handle drive selection change in diagnostics tab"""
-        selected_drive = self.diagnostics_device_var.get()
+        selected_drive = self._get_selected_diagnostics_device()
         if selected_drive:
             self.diagnostics_status_var.set(f"Drive selected: {selected_drive} - Choose diagnostic test")
     
     def check_drive_status(self):
         """Check basic drive status"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2019,7 +2032,7 @@ class LTFSGui:
     
     def check_tape_status(self):
         """Check tape status and health"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2051,7 +2064,7 @@ class LTFSGui:
     
     def check_position(self):
         """Check current tape position"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2074,7 +2087,7 @@ class LTFSGui:
     
     def check_hardware_info(self):
         """Get hardware information about the drive"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2106,7 +2119,7 @@ class LTFSGui:
     
     def run_rw_test(self):
         """Run read/write test"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2175,7 +2188,7 @@ class LTFSGui:
     
     def run_load_test(self):
         """Run load/unload test"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2212,7 +2225,7 @@ class LTFSGui:
     
     def run_seek_test(self):
         """Run seek test"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2250,7 +2263,7 @@ class LTFSGui:
     
     def run_full_diagnostic(self):
         """Run comprehensive diagnostic suite"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2305,7 +2318,7 @@ class LTFSGui:
     
     def rewind_tape(self):
         """Rewind tape to beginning"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2329,7 +2342,7 @@ class LTFSGui:
     
     def eject_tape(self):
         """Eject tape from drive"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2353,7 +2366,7 @@ class LTFSGui:
     
     def tension_release(self):
         """Release tape tension"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2377,7 +2390,7 @@ class LTFSGui:
     
     def clean_drive(self):
         """Clean tape drive (requires cleaning cartridge)"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2408,7 +2421,7 @@ class LTFSGui:
     
     def reset_drive(self):
         """Reset tape drive"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2437,7 +2450,7 @@ class LTFSGui:
     
     def get_log_pages(self):
         """Get drive log pages"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2465,7 +2478,7 @@ class LTFSGui:
     
     def get_error_stats(self):
         """Get error statistics"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2497,7 +2510,7 @@ class LTFSGui:
     
     def get_firmware_info(self):
         """Get firmware information"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -2552,7 +2565,7 @@ class LTFSGui:
     
     def export_diagnostic_report(self):
         """Export comprehensive diagnostic report"""
-        device = self.diagnostics_device_var.get()
+        device = self._get_selected_diagnostics_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -3287,7 +3300,7 @@ class LTFSGui:
             dialog.iconbitmap(default='warning')
         except:
             pass
-        
+
         # Create frame with scrollable text
         main_frame = ttk.Frame(dialog, padding=20)
         main_frame.pack(fill='both', expand=True)
@@ -3529,11 +3542,26 @@ class LTFSGui:
         # Configure ttk style with balanced theming
         style = ttk.Style()
         
-        # Use default theme but customize colors - preserves scaling
+        # Use a ttk theme that supports full color overrides consistently.
         try:
-            style.theme_use('default')  # Keep default theme for proper scaling
+            style.theme_use('clam')
         except:
             pass
+
+        # Base defaults applied to ttk widgets.
+        style.configure('.',
+                       background=theme['bg'],
+                       foreground=theme['fg'],
+                       fieldbackground=theme['entry_bg'],
+                       bordercolor=theme['border_color'],
+                       lightcolor=theme['button_bg'],
+                       darkcolor=theme['button_bg'])
+
+        # Semantic text styles used throughout the UI.
+        style.configure('Info.TLabel', background=theme['bg'], foreground=theme['info_fg'])
+        style.configure('Status.TLabel', background=theme['bg'], foreground=theme['fg'])
+        style.configure('Success.TLabel', background=theme['bg'], foreground=theme['success_fg'])
+        style.configure('Warning.TLabel', background=theme['bg'], foreground=theme['warning_fg'])
         
         # Configure key ttk styles without breaking scaling
         
@@ -3544,8 +3572,8 @@ class LTFSGui:
                        background=theme['tab_bg'],
                        foreground=theme['fg'])
         style.map('TNotebook.Tab', 
-                 background=[('selected', theme['tab_active'])],
-                 foreground=[('selected', theme['fg'])])
+                 background=[('selected', theme['tab_active']), ('active', theme['button_hover'])],
+                 foreground=[('selected', theme['fg']), ('active', theme['fg'])])
         
         # Frames - minimal styling
         style.configure('TFrame', 
@@ -3567,32 +3595,82 @@ class LTFSGui:
                        background=theme['button_bg'],
                        foreground=theme['fg'])
         style.map('TButton',
-                 background=[('active', theme['button_hover'])])
+                 background=[('active', theme['button_hover']), ('disabled', theme['entry_bg'])],
+                 foreground=[('disabled', theme['info_fg'])])
         
         # Entry fields and comboboxes - focus on background colors
         style.configure('TEntry', 
                        fieldbackground=theme['entry_bg'],
                        foreground=theme['entry_fg'],
                        insertcolor=theme['entry_fg'])
+        style.map('TEntry',
+                 fieldbackground=[('disabled', theme['text_bg']), ('readonly', theme['entry_bg'])],
+                 foreground=[('disabled', theme['info_fg']), ('readonly', theme['entry_fg'])])
         
         style.configure('TCombobox', 
                        fieldbackground=theme['entry_bg'],
                        foreground=theme['entry_fg'],
-                       background=theme['button_bg'])
+                       background=theme['button_bg'],
+                       arrowcolor=theme['fg'])
         style.map('TCombobox',
-                 fieldbackground=[('readonly', theme['entry_bg'])])
+                 fieldbackground=[('readonly', theme['entry_bg']), ('disabled', theme['text_bg'])],
+                 foreground=[('readonly', theme['entry_fg']), ('disabled', theme['info_fg'])],
+                 selectbackground=[('readonly', theme['select_bg'])],
+                 selectforeground=[('readonly', theme['select_fg'])])
         
         # Checkbuttons and radiobuttons
         style.configure('TCheckbutton', 
                        background=theme['bg'],
                        foreground=theme['fg'])
+        style.map('TCheckbutton',
+                 background=[('active', theme['bg'])],
+                 foreground=[('disabled', theme['info_fg'])])
         
         style.configure('TRadiobutton', 
                        background=theme['bg'],
                        foreground=theme['fg'])
+        style.map('TRadiobutton',
+                 background=[('active', theme['bg'])],
+                 foreground=[('disabled', theme['info_fg'])])
+        
+        style.configure('TSpinbox',
+                       fieldbackground=theme['entry_bg'],
+                       background=theme['button_bg'],
+                       foreground=theme['entry_fg'],
+                       arrowcolor=theme['fg'])
+        style.map('TSpinbox',
+                 fieldbackground=[('disabled', theme['text_bg']), ('readonly', theme['entry_bg'])],
+                 foreground=[('disabled', theme['info_fg']), ('readonly', theme['entry_fg'])])
+
+        # Ensure combobox dropdown list and menus use themed colors.
+        self.root.option_add('*TCombobox*Listbox*Background', theme['entry_bg'])
+        self.root.option_add('*TCombobox*Listbox*Foreground', theme['entry_fg'])
+        self.root.option_add('*TCombobox*Listbox*selectBackground', theme['select_bg'])
+        self.root.option_add('*TCombobox*Listbox*selectForeground', theme['select_fg'])
+        self.root.option_add('*Menu*background', theme['bg'])
+        self.root.option_add('*Menu*foreground', theme['fg'])
+        self.root.option_add('*Menu*activeBackground', theme['select_bg'])
+        self.root.option_add('*Menu*activeForeground', theme['select_fg'])
+        self.root.option_add('*Listbox*Background', theme['text_bg'])
+        self.root.option_add('*Listbox*Foreground', theme['text_fg'])
+        self.root.option_add('*Listbox*selectBackground', theme['select_bg'])
+        self.root.option_add('*Listbox*selectForeground', theme['select_fg'])
+        self.root.option_add('*Text*Background', theme['text_bg'])
+        self.root.option_add('*Text*Foreground', theme['text_fg'])
+        self.root.option_add('*Text*insertBackground', theme['text_fg'])
+        self.root.option_add('*Entry*Background', theme['entry_bg'])
+        self.root.option_add('*Entry*Foreground', theme['entry_fg'])
+        self.root.option_add('*Entry*insertBackground', theme['entry_fg'])
         
         # Apply theme to Tkinter widgets (listboxes, text widgets)
-        widget_config = {
+        listbox_config = {
+            'bg': theme['text_bg'],
+            'fg': theme['text_fg'],
+            'selectbackground': theme['select_bg'],
+            'selectforeground': theme['select_fg'],
+            'disabledforeground': theme['info_fg']
+        }
+        text_widget_config = {
             'bg': theme['text_bg'],
             'fg': theme['text_fg'],
             'selectbackground': theme['select_bg'],
@@ -3609,7 +3687,7 @@ class LTFSGui:
             
         for widget in listbox_widgets:
             try:
-                widget.configure(**widget_config)
+                widget.configure(**listbox_config)
             except (tk.TclError, AttributeError):
                 pass
         
@@ -3629,10 +3707,12 @@ class LTFSGui:
             text_widgets.append(self.mam_write_results)
         if hasattr(self, 'mam_summary_text'):
             text_widgets.append(self.mam_summary_text)
+        if hasattr(self, 'theme_info_text'):
+            text_widgets.append(self.theme_info_text)
         
         for widget in text_widgets:
             try:
-                widget.configure(**widget_config)
+                widget.configure(**text_widget_config)
             except (tk.TclError, AttributeError):
                 pass
         
@@ -3647,13 +3727,23 @@ class LTFSGui:
                     widget.configure(bg=theme['bg'])
                 elif widget_class == 'Label':
                     widget.configure(bg=theme['bg'], fg=theme['fg'])
-                elif widget_class in ['Text', 'Listbox']:
+                elif widget_class == 'Text':
                     widget.configure(
                         bg=theme['text_bg'],
                         fg=theme['text_fg'],
                         selectbackground=theme['select_bg'],
                         selectforeground=theme['select_fg'],
-                        insertbackground=theme['text_fg']
+                        insertbackground=theme['text_fg'],
+                        disabledbackground=theme['text_bg'],
+                        disabledforeground=theme['info_fg']
+                    )
+                elif widget_class == 'Listbox':
+                    widget.configure(
+                        bg=theme['text_bg'],
+                        fg=theme['text_fg'],
+                        selectbackground=theme['select_bg'],
+                        selectforeground=theme['select_fg'],
+                        disabledforeground=theme['info_fg']
                     )
                 elif widget_class == 'Entry':
                     widget.configure(
@@ -3661,7 +3751,9 @@ class LTFSGui:
                         fg=theme['entry_fg'],
                         selectbackground=theme['select_bg'],
                         selectforeground=theme['select_fg'],
-                        insertbackground=theme['entry_fg']
+                        insertbackground=theme['entry_fg'],
+                        disabledbackground=theme['text_bg'],
+                        disabledforeground=theme['info_fg']
                     )
                 elif widget_class == 'Button':
                     widget.configure(
@@ -3692,7 +3784,11 @@ class LTFSGui:
                         activebackground=theme['select_bg']
                     )
                 elif widget_class == 'Canvas':
-                    widget.configure(bg=theme['bg'])
+                    widget.configure(
+                        bg=theme['bg'],
+                        highlightbackground=theme['border_color'],
+                        highlightcolor=theme['select_bg']
+                    )
                 elif widget_class == 'Menu':
                     widget.configure(
                         bg=theme['bg'],
@@ -3942,6 +4038,28 @@ class LTFSGui:
         
         ttk.Label(left_col, text="Available Themes:", font=('Arial', 12, 'bold')).pack(anchor='w', pady=(0, 10))
         
+        theme_list_container = ttk.Frame(left_col)
+        theme_list_container.pack(fill='both', expand=True)
+        
+        theme_list_canvas = tk.Canvas(theme_list_container, highlightthickness=0, borderwidth=0)
+        theme_list_scrollbar = ttk.Scrollbar(theme_list_container, orient='vertical', command=theme_list_canvas.yview)
+        theme_list_scrollable = ttk.Frame(theme_list_canvas)
+        
+        def _update_theme_list_scrollregion(event):
+            theme_list_canvas.configure(scrollregion=theme_list_canvas.bbox("all"))
+        
+        theme_list_scrollable.bind("<Configure>", _update_theme_list_scrollregion)
+        theme_list_window = theme_list_canvas.create_window((0, 0), window=theme_list_scrollable, anchor="nw")
+        
+        def _resize_theme_list_window(event):
+            theme_list_canvas.itemconfigure(theme_list_window, width=event.width)
+        
+        theme_list_canvas.bind("<Configure>", _resize_theme_list_window)
+        theme_list_canvas.configure(yscrollcommand=theme_list_scrollbar.set)
+        
+        theme_list_canvas.pack(side='left', fill='both', expand=True)
+        theme_list_scrollbar.pack(side='right', fill='y')
+        
         # Theme selection variable
         self.theme_selection_var = tk.StringVar(value=self.current_theme_name.get())
         
@@ -3976,7 +4094,7 @@ class LTFSGui:
         
         # Create radio buttons for themes
         for theme_key, theme_info in self.theme_details.items():
-            theme_frame = ttk.Frame(left_col)
+            theme_frame = ttk.Frame(theme_list_scrollable)
             theme_frame.pack(fill='x', pady=5)
             
             # Radio button
@@ -3995,7 +4113,7 @@ class LTFSGui:
             
             # Best for info
             best_label = ttk.Label(desc_frame, text=f"Best for: {theme_info['best_for']}", 
-                                 font=('Arial', 8, 'italic'), foreground='#666666')
+                                 font=('Arial', 8, 'italic'), style='Info.TLabel')
             best_label.pack(anchor='w', pady=(2, 10))
         
         # Right column - Theme actions
@@ -4543,7 +4661,7 @@ class LTFSGui:
         warning_frame.pack(fill='x', padx=10, pady=10)
         
         warning_label = ttk.Label(warning_frame, text="⚠️  WARNING: Writing MAM attributes can affect tape behavior. Use with caution!", 
-                                foreground='red', font=('Arial', 10, 'bold'))
+                                style='Warning.TLabel', font=('Arial', 10, 'bold'))
         warning_label.pack()
         
         # Writable attributes
@@ -4648,7 +4766,7 @@ class LTFSGui:
     
     def on_mam_device_change(self, event=None):
         """Handle device selection change in MAM tab"""
-        selected_device = self.mam_device_var.get()
+        selected_device = self._get_selected_mam_device()
         if selected_device:
             self.log_message(f"MAM operations device set to: {selected_device}")
     
@@ -4672,7 +4790,7 @@ class LTFSGui:
     
     def read_mam_attributes(self):
         """Read selected MAM attributes from tape"""
-        device = self.mam_device_var.get()
+        device = self._get_selected_mam_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape device first.")
             return
@@ -4720,7 +4838,7 @@ class LTFSGui:
     
     def write_mam_attribute(self):
         """Write a MAM attribute to tape"""
-        device = self.mam_device_var.get()
+        device = self._get_selected_mam_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape device first.")
             return
@@ -4792,7 +4910,7 @@ class LTFSGui:
     
     def get_basic_mam_info(self):
         """Get basic MAM information summary"""
-        device = self.mam_device_var.get()
+        device = self._get_selected_mam_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape device first.")
             return
@@ -4823,7 +4941,7 @@ class LTFSGui:
     
     def dump_all_mam(self):
         """Dump all available MAM data"""
-        device = self.mam_device_var.get()
+        device = self._get_selected_mam_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape device first.")
             return
@@ -4854,7 +4972,7 @@ class LTFSGui:
     
     def get_mam_space_usage(self):
         """Get MAM space usage information"""
-        device = self.mam_device_var.get()
+        device = self._get_selected_mam_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape device first.")
             return
@@ -4880,7 +4998,7 @@ class LTFSGui:
     
     def validate_mam(self):
         """Validate MAM data integrity"""
-        device = self.mam_device_var.get()
+        device = self._get_selected_mam_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape device first.")
             return
@@ -4947,7 +5065,7 @@ class LTFSGui:
     
     def export_mam_report(self):
         """Export comprehensive MAM report"""
-        device = self.mam_device_var.get()
+        device = self._get_selected_mam_device()
         if not device:
             messagebox.showerror("Error", "Please select a tape device first.")
             return
