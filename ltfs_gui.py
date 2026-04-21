@@ -18,6 +18,7 @@ import threading
 import os
 import re
 import time
+import json
 from pathlib import Path
 
 class LTFSManager:
@@ -1697,9 +1698,85 @@ class LTFSGui:
         if selected_drive:
             self.compression_status_var.set(f"Drive selected: {selected_drive} - Choose compression mode below")
     
+    def _resolve_device_from_selection(self, selected_value):
+        """Resolve a combo-box value to an actual /dev tape device path."""
+        if not selected_value:
+            return selected_value
+        
+        if hasattr(self, 'device_combo_mapping') and selected_value in self.device_combo_mapping:
+            return self.device_combo_mapping[selected_value]
+        
+        match = re.search(r'\((/dev/[^)]+)\)$', selected_value)
+        if match:
+            return match.group(1)
+        
+        return selected_value
+    
+    @staticmethod
+    def _parse_mt_compression_status(status_output):
+        """Parse mt status output and return True/False/None for compression."""
+        lowered = status_output.lower()
+        
+        if re.search(r'data\s*compression\s*enabled\s*=\s*0', lowered):
+            return False
+        if re.search(r'\bcompression\b[^\n]*(off|disabled)\b', lowered):
+            return False
+        if re.search(r'data\s*compression\s*enabled\s*=\s*1', lowered):
+            return True
+        if re.search(r'\bcompression\b[^\n]*(on|enabled)\b', lowered):
+            return True
+        
+        return None
+    
+    def _compression_config_path(self):
+        """Path for persisted per-device compression mode preferences."""
+        config_dir = os.path.expanduser('~/.config/ltfs-gui')
+        os.makedirs(config_dir, exist_ok=True)
+        return os.path.join(config_dir, 'compression_modes.json')
+    
+    def _load_compression_preferences(self):
+        """Load compression preferences from disk."""
+        config_path = self._compression_config_path()
+        if not os.path.exists(config_path):
+            return {}
+        
+        try:
+            with open(config_path, 'r') as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+        
+        return {}
+    
+    def _save_compression_preferences(self, preferences):
+        """Save compression preferences to disk."""
+        config_path = self._compression_config_path()
+        try:
+            with open(config_path, 'w') as f:
+                json.dump(preferences, f, indent=2)
+        except Exception as e:
+            self.log_message(f"Warning: Could not save compression preferences: {str(e)}")
+    
+    def _get_saved_compression_mode(self, device):
+        """Return a previously saved mode for a device, if valid."""
+        preferences = self._load_compression_preferences()
+        mode = preferences.get(device)
+        if mode in self.compression_modes:
+            return mode
+        return None
+    
+    def _set_saved_compression_mode(self, device, mode):
+        """Persist compression mode for a specific device."""
+        preferences = self._load_compression_preferences()
+        preferences[device] = mode
+        self._save_compression_preferences(preferences)
+    
     def apply_compression_settings(self):
         """Apply the selected compression settings to the drive"""
-        device = self.compression_device_var.get()
+        selected_device = self.compression_device_var.get()
+        device = self._resolve_device_from_selection(selected_device)
         mode = self.compression_mode_var.get()
         
         if not device:
@@ -1718,23 +1795,34 @@ class LTFSGui:
         def apply_compression_thread():
             self.log_message(f"Applying {mode_title} compression to {device}...")
             
-            # Here you would implement the actual compression setting command
-            # For now, we'll simulate it
-            success = True  # This would be the result of the actual mt command
+            compression_value = "0" if mode == "none" else "1"
+            success, stdout, stderr = self.ltfs_manager.run_command(
+                f"mt -f {device} compression {compression_value}"
+            )
             
             if success:
+                self._set_saved_compression_mode(device, mode)
+                
+                verify_success, verify_stdout, _ = self.ltfs_manager.run_command(f"mt -f {device} status")
+                detected_state = self._parse_mt_compression_status(verify_stdout) if verify_success else None
+                if detected_state is None:
+                    state_desc = "unknown (saved mode applied)"
+                else:
+                    state_desc = "enabled" if detected_state else "disabled"
+                
                 self.log_message(f"Successfully applied {mode_title} compression to {device}")
-                self.compression_status_var.set(f"Applied: {mode_title} on {device}")
-                messagebox.showinfo("Success", f"Compression mode set to {mode_title}")
+                self.compression_status_var.set(f"Applied: {mode_title} on {device} (hardware: {state_desc})")
+                messagebox.showinfo("Success", f"Compression mode set to {mode_title} on {device}")
             else:
                 self.log_message(f"Failed to apply compression settings to {device}")
-                messagebox.showerror("Error", "Failed to apply compression settings")
+                messagebox.showerror("Error", f"Failed to apply compression settings:\n{stderr}")
         
         threading.Thread(target=apply_compression_thread, daemon=True).start()
     
     def get_current_compression(self):
         """Get the current compression settings from the selected drive"""
-        device = self.compression_device_var.get()
+        selected_device = self.compression_device_var.get()
+        device = self._resolve_device_from_selection(selected_device)
         if not device:
             messagebox.showerror("Error", "Please select a tape drive first.")
             return
@@ -1742,14 +1830,34 @@ class LTFSGui:
         def get_compression_thread():
             self.log_message(f"Getting compression settings for {device}...")
             
-            # Here you would implement the actual command to get compression status
-            # For now, we'll simulate it
-            current_mode = "default"  # This would be parsed from mt command output
-            mode_info = self.compression_modes.get(current_mode, {})
+            success, stdout, stderr = self.ltfs_manager.run_command(f"mt -f {device} status")
+            if not success:
+                self.log_message(f"Failed to get compression status for {device}: {stderr}")
+                messagebox.showerror("Error", f"Failed to get compression status:\n{stderr}")
+                return
+            
+            detected_state = self._parse_mt_compression_status(stdout)
+            saved_mode = self._get_saved_compression_mode(device)
+            
+            if detected_state is False:
+                current_mode = "none"
+                status_note = "detected from hardware"
+            elif detected_state is True:
+                current_mode = saved_mode if saved_mode and saved_mode != "none" else "default"
+                status_note = "detected from hardware"
+            else:
+                current_mode = saved_mode if saved_mode else "default"
+                status_note = "hardware status unavailable, using saved/default mode"
+            
+            mode_info = self.compression_modes.get(current_mode, self.compression_modes["default"])
             
             self.compression_mode_var.set(current_mode)
-            self.compression_status_var.set(f"Current setting: {mode_info.get('title', current_mode)}")
-            self.log_message(f"Current compression mode for {device}: {mode_info.get('title', current_mode)}")
+            self.compression_status_var.set(
+                f"Current setting: {mode_info.get('title', current_mode)} ({status_note})"
+            )
+            self.log_message(
+                f"Current compression mode for {device}: {mode_info.get('title', current_mode)} ({status_note})"
+            )
         
         threading.Thread(target=get_compression_thread, daemon=True).start()
     
@@ -2685,22 +2793,15 @@ class LTFSGui:
     def get_selected_device(self, use_sg_device=False):
         """Get the currently selected device - handle enhanced device selection"""
         selected_display = self.mount_device_var.get()
+        selected_device = self._resolve_device_from_selection(selected_display)
         
-        # Convert display name to actual device path
-        if hasattr(self, 'device_combo_mapping') and selected_display in self.device_combo_mapping:
-            drive_info = self.device_combo_mapping[selected_display]
-            if use_sg_device and drive_info.get('sg_device'):
-                selected_device = drive_info['sg_device']
-            else:
-                selected_device = drive_info['primary_device']
-            print(f"DEBUG: Selected device: {selected_display} -> {selected_device}")
-        else:
-            # Fallback to direct device path
-            selected_device = selected_display
-            print(f"DEBUG: Selected device (direct): {selected_device}")
+        if use_sg_device and selected_device:
+            hw_info = self.ltfs_manager.drive_hardware_info.get(selected_device, {})
+            sg_device = hw_info.get('sg_device')
+            if sg_device:
+                selected_device = sg_device
         
         if not selected_device:
-            print(f"DEBUG: No device selected, available devices: {self.ltfs_manager.tape_drives}")
             # Auto-select first available device if none selected
             if self.ltfs_manager.tape_drives:
                 selected_device = self.ltfs_manager.tape_drives[0]
@@ -2713,7 +2814,6 @@ class LTFSGui:
                             break
                 else:
                     self.mount_device_var.set(selected_device)
-                print(f"DEBUG: Auto-selected device: {selected_device}")
         
         return selected_device
     
@@ -3935,7 +4035,11 @@ class LTFSGui:
         
         button_frame = ttk.Frame(tab1)
         button_frame.pack(fill='x', pady=10)
-        ttk.Button(button_frame, text="Sample Button").pack(side='left', padx=(0, 10))
+        ttk.Button(
+            button_frame,
+            text="Sample Button",
+            command=self.on_theme_preview_sample_button
+        ).pack(side='left', padx=(0, 10))
         
         # Sample checkbox
         sample_check = tk.BooleanVar(value=True)
@@ -3971,6 +4075,10 @@ class LTFSGui:
             'text': sample_text,
             'frames': [sample_frame, tab1, tab2, entry_frame, button_frame]
         }
+    
+    def on_theme_preview_sample_button(self):
+        """Handle clicks for non-functional preview/sample buttons."""
+        self.log_message("Theme preview sample button clicked")
     
     def setup_advanced_theme_settings(self, parent):
         """Set up advanced theme settings"""
@@ -5026,16 +5134,13 @@ class LTFSGui:
                   command=self.load_custom_theme).pack(side='left', padx=(0, 10))
         
         # Color dropper tool
-        print("DEBUG: Creating color dropper button")
         dropper_button = ttk.Button(control_frame, text="🎨 Color Dropper", 
                   command=self.activate_color_dropper)
         dropper_button.pack(side='right', padx=(10, 0))
-        print(f"DEBUG: Color dropper button created: {dropper_button}")
         
         reset_button = ttk.Button(control_frame, text="Reset Colors", 
                   command=self.reset_custom_colors)
         reset_button.pack(side='right')
-        print(f"DEBUG: Reset button created: {reset_button}")
         
         # Live preview area
         preview_frame = ttk.LabelFrame(color_main, text="Live Preview", padding=10)
@@ -5053,7 +5158,11 @@ class LTFSGui:
         self.preview_entry.pack(side='left', padx=(0, 10))
         self.preview_entry.insert(0, "Sample Input")
         
-        self.preview_button = tk.Button(preview_content, text="Sample Button")
+        self.preview_button = tk.Button(
+            preview_content,
+            text="Sample Button",
+            command=self.on_theme_preview_sample_button
+        )
         self.preview_button.pack(side='left', padx=(0, 10))
         
         self.preview_text = tk.Text(preview_content, height=3, width=25)
