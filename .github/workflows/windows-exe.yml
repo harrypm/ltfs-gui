@@ -47,7 +47,7 @@ jobs:
             --name ltfs-gui `
             --onefile `
             --windowed `
-            --icon packaging/windows/ltfs-gui.ico `
+            --icon "${{ github.workspace }}/packaging/windows/ltfs-gui.ico" `
             --distpath dist `
             --workpath build/windows/pyinstaller/build `
             --specpath build/windows/pyinstaller `

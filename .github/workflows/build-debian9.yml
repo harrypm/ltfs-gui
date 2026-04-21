@@ -6,12 +6,32 @@ jobs:
   build:
     name: Build on Debian9
     runs-on: ubuntu-latest
+    container:
+      image: debian:stretch
 
     steps:
       - name: Set up Git repository
-        uses: actions/checkout@v1
+        uses: actions/checkout@v4
+      - name: Configure archive apt sources
+        run: |
+          cat > /etc/apt/sources.list <<'EOF'
+          deb [trusted=yes] http://archive.debian.org/debian stretch main
+          deb [trusted=yes] http://archive.debian.org/debian stretch-updates main
+          deb [trusted=yes] http://archive.debian.org/debian-security stretch/updates main
+          EOF
+          cat > /etc/apt/apt.conf.d/99archive <<'EOF'
+          Acquire::Check-Valid-Until "false";
+          Acquire::AllowInsecureRepositories "true";
+          EOF
+      - name: Install dependencies
+        run: |
+          apt-get -o Acquire::Check-Valid-Until=false update
+          DEBIAN_FRONTEND=noninteractive apt-get -q -y install \
+            build-essential automake autoconf libtool pkg-config \
+            icu-devtools libicu-dev libxml2-dev uuid-dev fuse libfuse-dev libsnmp-dev
       - name: Build LTFS
         id: build
-        uses: LinearTapeFileSystem/Debian9-Build@v1.0
-        with:
-          destination: '/tmp/ltfs'
+        run: |
+          ./autogen.sh
+          ./configure
+          make -j"$(nproc)"

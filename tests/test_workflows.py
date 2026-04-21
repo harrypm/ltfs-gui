@@ -59,7 +59,7 @@ class TestWorkflowExpectations(unittest.TestCase):
             "cache: pip",
             "pyinstaller",
             "--onefile",
-            "--icon packaging/windows/ltfs-gui.ico",
+            '--icon "${{ github.workspace }}/packaging/windows/ltfs-gui.ico"',
             "dist/ltfs-gui.exe",
             "actions/upload-artifact@v4",
             "workflow_dispatch",
